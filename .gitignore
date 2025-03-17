@@ -1,7 +1,9 @@
 __pychche__/
+BallDetection*
+LogoDetection*
+CameraCalibration/
 CameraControl/
 OldFiles/
 OtherFunctions/
-BallDetection*
-LogoDetection*
+OUTPUT/
 image*
