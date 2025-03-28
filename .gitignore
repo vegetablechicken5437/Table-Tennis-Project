@@ -1,9 +1,12 @@
-__pychche__/
-BallDetection*
-LogoDetection*
+__pycache__/
+BallDetection_YOLOv5/
 CameraCalibration/
 CameraControl/
+Cropped_Balls/
+Images/
+Images_LR/
+LogoDetection_YOLOv8/
 OldFiles/
 OtherFunctions/
 OUTPUT/
-image*
+ProcessedImages/

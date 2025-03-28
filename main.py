@@ -1,9 +1,7 @@
 import os
-from glob import glob
 import cv2
 import numpy as np
-from enhance_images import enhance_all
-from split_images import split_left_right_images
+from image_processor import *
 from bbox_processer import get_coords_from_bbox, crop_bbox
 from yolo_runner import ball_detection_yolov5, logo_detection_yolov8
 from pick_corners import CornerPicker
@@ -12,25 +10,29 @@ from scipy.ndimage import gaussian_filter1d
 from spin_calculation import fit_spin_axis, calc_candidate_spin_rates, compute_trajectory_aero, find_best_matching_rps
 from visualize_functions import draw_trajectories, plot_trajectory_with_spin, draw_spin_axis
 
-ENHANCE = True
+ENHANCE = False
+CREATE_VIDEO = False
 TRAIN = {'Ball':False, 'Logo':False}
-INFERENCE = {'Ball':True, 'Logo':False}
-CROP_BBOX = True
+INFERENCE = {'Ball':False, 'Logo':True}
+CROP_BBOX = False
 FIND_BALL_ON_IMAGE = False
 FIND_LOGO_ON_BALL = False
 PICK_CORNERS = False
 CALCULATE_3D = False
 CALCULATE_SPIN_RATE = False
 
-sample_num = '5-2'
-sample_folder_name = f'top{sample_num}'
-all_img_folder = 'CameraControl/0308-2'
-all_img_folder_LR = 'Images_LR'
+all_sample_folder_name = '0325-2'
+sample_folder_name = 'top5-1'
+
+ori_img_folder_path = os.path.join('CameraControl', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
+processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
+os.makedirs(processed_img_folder_path, exist_ok=True) 
 
 ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':30}
 logo_yolo_params = {'img_size':120, 'batch':16, 'epochs':50}
 
-output_folder = f'OUTPUT/{sample_folder_name}'
+output_folder_path = os.path.join('OUTPUT', all_sample_folder_name, sample_folder_name)
+os.makedirs(output_folder_path, exist_ok=True)
 
 camParamsPath = "CameraCalibration/STEREO_IMAGES/cvCalibration_result.txt"
 
@@ -38,53 +40,51 @@ fps = 225
 
 if __name__ == '__main__':
     # ----------------------------------------------------------------
-    # Step 1: 分割影像(原始影像為左右合併)
+    # Step 1 & 2: 分割影像(原始影像為左右合併)
     # ----------------------------------------------------------------
-    os.makedirs(output_folder, exist_ok=True)
-    sample_folder = f'{all_img_folder}/{sample_folder_name}'            # ex: Images/sample-1
-    sample_folder_LR = f'{all_img_folder_LR}/{sample_folder_name}_LR'   # ex: Images_LR/sample-1_LR
-    if not os.path.exists(sample_folder_LR):                            # 若分割影像資料夾不在
-        split_left_right_images(sample_folder, sample_folder_LR)
-    # ----------------------------------------------------------------
+    enhanced_folder_path = os.path.join(processed_img_folder_path, 'enhanced')
+    enhanced_L_folder_path = os.path.join(processed_img_folder_path, 'enhanced_L')
+    enhanced_R_folder_path = os.path.join(processed_img_folder_path, 'enhanced_R')
+    for folder_path in (enhanced_folder_path, enhanced_L_folder_path, enhanced_R_folder_path):
+        os.makedirs(folder_path, exist_ok=True)
 
-    # ----------------------------------------------------------------
-    # Step 2: 影像增強
-    # ----------------------------------------------------------------
-    enhanced_img_folder = f'{sample_folder_LR}_enhanced'    # ex: Images_LR/sample-1_LR_enhanced
     if ENHANCE:
-        if os.path.exists(enhanced_img_folder):     # 若資料夾已存在，詢問是否再次增強
-            print(f'{enhanced_img_folder} 已存在!')
-            ins = input('重新增強所有影像? (y/n) ')
-            if ins == 'y' or ins == 'Y':
-                enhance_all(sample_folder_LR, enhanced_img_folder)
-        else:
-            enhance_all(sample_folder_LR, enhanced_img_folder)
-        img_folder = enhanced_img_folder    # 後續處理的資料夾設為增強影像的資料夾
-    else:
-        if os.path.exists(enhanced_img_folder): # 若資料夾已存在，使用增強影像的資料夾
-            img_folder = enhanced_img_folder
-        else:
-            img_folder = sample_folder_LR     # 若不增強影像，後續處理的資料夾設為原始影像的資料夾
-    # ----------------------------------------------------------------
-    
+        print('🚀 增強與分割所有影像 ...')
+        for image_file_name in tqdm(os.listdir(ori_img_folder_path)):
+            image_path = os.path.join(ori_img_folder_path, image_file_name)
+
+            img = cv2.imread(image_path)
+            enhanced = enhance_image(img)
+            imgL, imgR = split_image(enhanced)
+
+            # cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_EN.jpg"), enhanced)
+            cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+            cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+            cv2.imwrite(os.path.join(enhanced_L_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+            cv2.imwrite(os.path.join(enhanced_R_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+
+    if CREATE_VIDEO:
+        for folder_path in (enhanced_folder_path, enhanced_L_folder_path, enhanced_R_folder_path):
+            createVideo(folder_path, f'{folder_path.split('/')[-1]}.mp4', fps=20)
+
     # ----------------------------------------------------------------
     # Step 3: YOLO偵測桌球(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
     ball_yolo_folder = 'BallDetection_YOLOv5/yolov5'
-    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, img_folder, sample_folder_name, TRAIN, INFERENCE)
+    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, enhanced_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
     # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # Step 4: 裁切bounding box 並輸出裁切圖片
     # ----------------------------------------------------------------
-    ball_detect_result_path = os.path.join(ball_yolo_folder, f'runs/detect/exp_{sample_folder_name}')    # 偵測結果資料夾(含多條軌跡的偵測結果)
-    cropped_balls_folder = os.path.join('Cropped_Balls', sample_folder_name)
+    ball_detect_result_path = os.path.join(ball_yolo_folder, f'runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}')    # 偵測結果資料夾(含多條軌跡的偵測結果)
+    cropped_balls_folder = os.path.join('Cropped_Balls', all_sample_folder_name, sample_folder_name)
     os.makedirs(cropped_balls_folder, exist_ok=True)
     
     if CROP_BBOX:
-        bbox_info_L, bbox_info_R = crop_bbox(img_folder, ball_detect_result_path, cropped_balls_folder)     # 裁切球的bbox並輸出bbox資訊
-        bbox_info_L_path = os.path.join(output_folder, 'bbox_info_L.txt')
-        bbox_info_R_path = os.path.join(output_folder, 'bbox_info_R.txt')
+        bbox_info_L, bbox_info_R = crop_bbox(enhanced_folder_path, ball_detect_result_path, cropped_balls_folder)     # 裁切球的bbox並輸出bbox資訊
+        bbox_info_L_path = os.path.join(output_folder_path, 'bbox_info_L.txt')
+        bbox_info_R_path = os.path.join(output_folder_path, 'bbox_info_R.txt')
         np.savetxt(bbox_info_L_path, bbox_info_L, fmt='%d')
         np.savetxt(bbox_info_R_path, bbox_info_R, fmt='%d')
 
@@ -92,26 +92,26 @@ if __name__ == '__main__':
     # Step 5: YOLO偵測Logo(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
     logo_yolo_folder = 'LogoDetection_YOLOv8'
-    logo_detection_yolov8(logo_yolo_folder, logo_yolo_params, cropped_balls_folder, sample_folder_name, TRAIN, INFERENCE)
+    logo_detection_yolov8(logo_yolo_folder, logo_yolo_params, cropped_balls_folder, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
 
     # ----------------------------------------------------------------
     # Step 6: 輸出球和logo在影像上的座標(每個frame都有左、右影像的球座標)
     # ----------------------------------------------------------------
     if FIND_BALL_ON_IMAGE:
         ball_detect_result_path = os.path.join(ball_yolo_folder, f'runs/detect/exp_{sample_folder_name}') 
-        left_balls, right_balls = get_coords_from_bbox(ball_detect_result_path, output_folder, dtype='ball')  
+        left_balls, right_balls = get_coords_from_bbox(ball_detect_result_path, output_folder_path, dtype='ball')  
     if FIND_LOGO_ON_BALL: 
         # 最新預測結果路徑: runs/detect/predict{last}
         logo_detect_result_path = os.path.join(logo_yolo_folder, f'runs/detect/predict_{sample_folder_name}') # 匹配以predict開頭的所有檔案或資料夾 
-        left_logos, right_logos = get_coords_from_bbox(logo_detect_result_path, output_folder, dtype='logo')  
+        left_logos, right_logos = get_coords_from_bbox(logo_detect_result_path, output_folder_path, dtype='logo')  
     # ----------------------------------------------------------------
     
     # ----------------------------------------------------------------
     # Step 7: # 透過UI介面手動選取球桌四角，定義世界坐標系
     # ----------------------------------------------------------------
     if PICK_CORNERS:
-        picker = CornerPicker([], output_folder)
-        picker.pick_corners(img_folder)
+        picker = CornerPicker([], output_folder_path)
+        picker.pick_corners(enhanced_folder_path)
         left_corners, right_corners = picker.left_corners, picker.right_corners
     # ----------------------------------------------------------------
 
@@ -121,7 +121,7 @@ if __name__ == '__main__':
     if CALCULATE_3D:
         camParams = calc3D.read_calibration_file(camParamsPath)
 
-        os.chdir(output_folder)
+        os.chdir(output_folder_path)
         left_corners, right_corners = np.loadtxt('left_corners.txt'), np.loadtxt('right_corners.txt')
         left_balls, right_balls = np.loadtxt('left_balls.txt'), np.loadtxt('right_balls.txt')
         left_logos, right_logos = np.loadtxt('left_logos.txt'), np.loadtxt('right_logos.txt')
@@ -135,24 +135,24 @@ if __name__ == '__main__':
         # traj_3D = gaussian_filter1d(traj_3D, sigma=2, axis=0)
         logos_3D = calc3D.myDLT(camParams, left_logos, right_logos)  # logo 2D座標是根據裁切影像
         
-        corners_3D_path = f'{output_folder}/corners_3D.txt'
+        corners_3D_path = f'{output_folder_path}/corners_3D.txt'
         # np.savetxt(corners_3D_path, corners_3D)
         calc3D.changeCoordSys(corners_3D, corners_3D, corners_3D_path)
 
-        traj_3D_path = f'{output_folder}/traj_3D.txt'
+        traj_3D_path = f'{output_folder_path}/traj_3D.txt'
         calc3D.changeCoordSys(corners_3D, traj_3D, traj_3D_path)
         
-        logos_3D_path = f'{output_folder}/logos_3D.txt'
+        logos_3D_path = f'{output_folder_path}/logos_3D.txt'
         calc3D.changeCoordSys(corners_3D, logos_3D, logos_3D_path)
 
     # ----------------------------------------------------------------
     # Step 8: # 計算旋轉速度
     # ----------------------------------------------------------------
     if CALCULATE_SPIN_RATE:
-        ball_frame_nums = np.loadtxt(f'{output_folder}/ball_frame_nums.txt', dtype=int)
-        logo_frame_nums = np.loadtxt(f'{output_folder}/logo_frame_nums.txt', dtype=int)
-        traj_3D = np.loadtxt(f'{output_folder}/traj_3D.txt')  # 完整球軌跡
-        logos_3D = np.loadtxt(f'{output_folder}/logos_3D.txt')  # 偵測到logo的3D點
+        ball_frame_nums = np.loadtxt(f'{output_folder_path}/ball_frame_nums.txt', dtype=int)
+        logo_frame_nums = np.loadtxt(f'{output_folder_path}/logo_frame_nums.txt', dtype=int)
+        traj_3D = np.loadtxt(f'{output_folder_path}/traj_3D.txt')  # 完整球軌跡
+        logos_3D = np.loadtxt(f'{output_folder_path}/logos_3D.txt')  # 偵測到logo的3D點
 
         if isinstance(logo_frame_nums, np.ndarray) and logo_frame_nums.size > 2:
 
@@ -196,7 +196,7 @@ if __name__ == '__main__':
             trajectory_ccw_extra = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps_ccw_extra, dt_list, num_steps, plane_normal, aero_params)
             
             # 畫出可能的軌跡
-            candidate_trajectories_path = f'{output_folder}/candidate_trajectories.html'
+            candidate_trajectories_path = f'{output_folder_path}/candidate_trajectories.html'
             draw_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, candidate_trajectories_path)
             
             # 建立字典
@@ -206,8 +206,8 @@ if __name__ == '__main__':
             # 比對軌跡並找出最佳轉速
             best_rps = find_best_matching_rps(traj_3D, aero_trajectories, rps_dict)
             print(f'Best RPS: {best_rps} rps')
-            np.savetxt(f'{output_folder}/best_rps.txt', [best_rps])
+            np.savetxt(f'{output_folder_path}/best_rps.txt', [best_rps])
 
             # 畫出最終軌跡和轉速
-            traj_with_spin_path = f"{output_folder}/trajectory_with_spin.html"
+            traj_with_spin_path = f"{output_folder_path}/trajectory_with_spin.html"
             plot_trajectory_with_spin(traj_3D, plane_normal, best_rps, traj_with_spin_path)
