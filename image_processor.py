@@ -14,13 +14,14 @@ def split_image(image):
 
 def enhance_image(image, alpha=1.5, beta=30):
 
-    bright_image = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)  # 調整亮度
-    lab = cv2.cvtColor(bright_image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  # 調整對比度
-    l = clahe.apply(l)
-    enhanced_lab = cv2.merge((l, a, b))
-    enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+    enhanced = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)  # 調整亮度
+
+    # lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+    # l, a, b = cv2.split(lab)
+    # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))  # 調整對比度
+    # l = clahe.apply(l)
+    # enhanced_lab = cv2.merge((l, a, b))
+    # enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
     
     # gamma = 2
     # invGamma = 1.0 / gamma
@@ -28,6 +29,7 @@ def enhance_image(image, alpha=1.5, beta=30):
     # enhanced = cv2.LUT(image, table)
 
     # enhanced = cv2.GaussianBlur(enhanced, (25, 25), 0)
+    # enhanced = cv2.fastNlMeansDenoisingColored(enhanced, None, 10, 10, 3, 11)
     # enhanced = cv2.fastNlMeansDenoisingColored(enhanced, None, 10, 10, 7, 21)
     # enhanced = cv2.bilateralFilter(enhanced, 20, 20, 20)
     # enhanced = cv2.medianBlur(enhanced, 5)
@@ -38,6 +40,8 @@ def enhance_image(image, alpha=1.5, beta=30):
     #                            [0, -1, 0]])
     # sharpened = cv2.filter2D(enhanced, -1, sharpen_kernel)
     # enhanced = cv2.addWeighted(enhanced, 0.6, sharpened, 0.4, 0)
+
+    # enhanced = cv2.GaussianBlur(enhanced, (5, 5), 0)
 
     return enhanced
 
@@ -70,9 +74,14 @@ def createVideo(image_folder_path, output_video_path, fps=30):
 # === 主程式 ===
 if __name__ == "__main__":
 
-    img = cv2.imread(r"C:\Users\jason\Desktop\TableTennisProject\CameraControl\0325-2\top5-1\image-0129.jpg")
-    enhanced = enhance_image(img, alpha=2, beta=30)
-    cv2.imwrite(r"C:\Users\jason\Desktop\TableTennisProject\ProcessedImages\0325-2\top5-1\enhanced\image-0129_EN.jpg", enhanced)
+    ori_img_folder_path = 'TEMP'
+    output_folder_path = 'TEMP_EN'
+
+    for i, image_file_name in enumerate(tqdm(os.listdir(ori_img_folder_path))):
+        image_path = os.path.join(ori_img_folder_path, image_file_name)
+        img = cv2.imread(image_path)
+        enhanced = enhance_image(img, 2, 30)
+        cv2.imwrite(f"{output_folder_path}/{i}.jpg", enhanced)
 
     # image_folder_path = 'samples'
     # output_video_path = 'demo_video.mp4'

@@ -110,21 +110,7 @@ def get_coords_from_bbox(detect_result_path, output_folder, dtype):
 
     return left_pts, right_pts
 
-def enhance_image(image):
-    """
-    對影像進行調亮、降噪與增強對比度處理
-    """
-    # bright_image = cv2.convertScaleAbs(image, alpha=1.5, beta=30)
-    # denoised_image = bright_image  # 可選擇性地進行降噪
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    enhanced_lab = cv2.merge((l, a, b))
-    enhanced_image = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-    return enhanced_image
-
-def crop_ball_from_image(image, label, image_width, image_height, scale_factor=2, size=(120, 120)):
+def crop_ball_from_image(image, label, image_width, image_height, scale_factor=2, size_x=128):
     """
     根據 YOLO 標籤裁切桌球影像，並放大 bbox
     """
@@ -139,8 +125,9 @@ def crop_ball_from_image(image, label, image_width, image_height, scale_factor=2
     y2 = min(image_height, y_center + box_height // 2)
 
     cropped_ball = image[y1:y2, x1:x2]
-    cropped_ball = cv2.resize(cropped_ball, size, interpolation=cv2.INTER_AREA)
-    
+    # cropped_ball = cv2.resize(cropped_ball, size, interpolation=cv2.INTER_AREA)
+    cropped_ball = cv2.resize(cropped_ball, (size_x, int(cropped_ball.shape[0] * (size_x / cropped_ball.shape[1]))))
+
     return cropped_ball, x1, y1, x2, y2
 
 def crop_bbox(img_folder, detect_result_path, output_folder):
@@ -155,7 +142,7 @@ def crop_bbox(img_folder, detect_result_path, output_folder):
     label_files = filter_lr_files(label_files)  # 過濾只保留同時擁有 L 和 R 的檔案
 
     bbox_info_L, bbox_info_R = [], []
-    print('🚀 裁切所有影像中 ...')
+    print('🚀 裁切所有影像的 bbox ...')
     for label_file_name in tqdm(label_files):
         label_path = os.path.join(detect_result_path, 'labels', label_file_name)
         labels = read_yolo_labels(label_path)

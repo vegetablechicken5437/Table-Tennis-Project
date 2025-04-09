@@ -2,34 +2,33 @@ import os
 import cv2
 import numpy as np
 from image_processor import *
-from bbox_processer import get_coords_from_bbox, crop_bbox
-from yolo_runner import ball_detection_yolov5, logo_detection_yolov8
+from label_processer import *
+from yolo_runner import *
 from pick_corners import CornerPicker
 import calculation_3D as calc3D
 from scipy.ndimage import gaussian_filter1d
 from spin_calculation import fit_spin_axis, calc_candidate_spin_rates, compute_trajectory_aero, find_best_matching_rps
 from visualize_functions import draw_trajectories, plot_trajectory_with_spin, draw_spin_axis
 
-ENHANCE = False
+PROCESS_IMAGE = False
 CREATE_VIDEO = False
 TRAIN = {'Ball':False, 'Logo':False}
 INFERENCE = {'Ball':False, 'Logo':True}
 CROP_BBOX = False
-FIND_BALL_ON_IMAGE = False
-FIND_LOGO_ON_BALL = False
+EXTRACT_2D_POINTS = False
 PICK_CORNERS = False
 CALCULATE_3D = False
 CALCULATE_SPIN_RATE = False
 
-all_sample_folder_name = '0325-2'
-sample_folder_name = 'top5-1'
+all_sample_folder_name = '0401'
+sample_folder_name = '20250401_203921'
 
-ori_img_folder_path = os.path.join('CameraControl', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
+ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
 os.makedirs(processed_img_folder_path, exist_ok=True) 
 
-ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':30}
-logo_yolo_params = {'img_size':120, 'batch':16, 'epochs':50}
+ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':50}
+mark_yolo_params = {'img_size':128, 'batch':16, 'epochs':100}
 
 output_folder_path = os.path.join('OUTPUT', all_sample_folder_name, sample_folder_name)
 os.makedirs(output_folder_path, exist_ok=True)
@@ -42,68 +41,64 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     # Step 1 & 2: 分割影像(原始影像為左右合併)
     # ----------------------------------------------------------------
-    enhanced_folder_path = os.path.join(processed_img_folder_path, 'enhanced')
-    enhanced_L_folder_path = os.path.join(processed_img_folder_path, 'enhanced_L')
-    enhanced_R_folder_path = os.path.join(processed_img_folder_path, 'enhanced_R')
-    for folder_path in (enhanced_folder_path, enhanced_L_folder_path, enhanced_R_folder_path):
+    processed_folder_path = os.path.join(processed_img_folder_path, 'enhanced_LR')
+    processed_L_folder_path = os.path.join(processed_img_folder_path, 'enhanced_L')
+    processed_R_folder_path = os.path.join(processed_img_folder_path, 'enhanced_R')
+    for folder_path in (processed_folder_path, processed_L_folder_path, processed_R_folder_path):
         os.makedirs(folder_path, exist_ok=True)
 
-    if ENHANCE:
+    if PROCESS_IMAGE:
         print('🚀 增強與分割所有影像 ...')
         for image_file_name in tqdm(os.listdir(ori_img_folder_path)):
             image_path = os.path.join(ori_img_folder_path, image_file_name)
 
             img = cv2.imread(image_path)
-            enhanced = enhance_image(img)
+            enhanced = enhance_image(img, 2, 30)
+            # img = cv2.bilateralFilter(img, 5, 0, 0)
             imgL, imgR = split_image(enhanced)
 
-            # cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_EN.jpg"), enhanced)
-            cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
-            cv2.imwrite(os.path.join(enhanced_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
-            cv2.imwrite(os.path.join(enhanced_L_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
-            cv2.imwrite(os.path.join(enhanced_R_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+            # cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_EN.jpg"), enhanced)
+            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+            cv2.imwrite(os.path.join(processed_L_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+            cv2.imwrite(os.path.join(processed_R_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
 
     if CREATE_VIDEO:
-        for folder_path in (enhanced_folder_path, enhanced_L_folder_path, enhanced_R_folder_path):
+        for folder_path in (processed_L_folder_path, processed_R_folder_path):
             createVideo(folder_path, f'{folder_path.split('/')[-1]}.mp4', fps=20)
 
     # ----------------------------------------------------------------
     # Step 3: YOLO偵測桌球(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
     ball_yolo_folder = 'BallDetection_YOLOv5/yolov5'
-    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, enhanced_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
+    # ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, ori_img_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
+    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, processed_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
     # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # Step 4: 裁切bounding box 並輸出裁切圖片
     # ----------------------------------------------------------------
-    ball_detect_result_path = os.path.join(ball_yolo_folder, f'runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}')    # 偵測結果資料夾(含多條軌跡的偵測結果)
+    ball_bbox_label_path = os.path.join(ball_yolo_folder, f'runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}/labels')    # 偵測結果資料夾(含多條軌跡的偵測結果)
     cropped_balls_folder = os.path.join('Cropped_Balls', all_sample_folder_name, sample_folder_name)
     os.makedirs(cropped_balls_folder, exist_ok=True)
     
     if CROP_BBOX:
-        bbox_info_L, bbox_info_R = crop_bbox(enhanced_folder_path, ball_detect_result_path, cropped_balls_folder)     # 裁切球的bbox並輸出bbox資訊
-        bbox_info_L_path = os.path.join(output_folder_path, 'bbox_info_L.txt')
-        bbox_info_R_path = os.path.join(output_folder_path, 'bbox_info_R.txt')
-        np.savetxt(bbox_info_L_path, bbox_info_L, fmt='%d')
-        np.savetxt(bbox_info_R_path, bbox_info_R, fmt='%d')
+        all_bbox_xyxy = crop_bbox(processed_folder_path, ball_bbox_label_path, cropped_balls_folder)
 
     # ----------------------------------------------------------------
     # Step 5: YOLO偵測Logo(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
-    logo_yolo_folder = 'LogoDetection_YOLOv8'
-    logo_detection_yolov8(logo_yolo_folder, logo_yolo_params, cropped_balls_folder, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
+    mark_yolo_folder = 'LogoDetection_YOLOv8'
+    logo_detection_yolov8(mark_yolo_folder, mark_yolo_params, cropped_balls_folder, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
 
     # ----------------------------------------------------------------
     # Step 6: 輸出球和logo在影像上的座標(每個frame都有左、右影像的球座標)
     # ----------------------------------------------------------------
-    if FIND_BALL_ON_IMAGE:
-        ball_detect_result_path = os.path.join(ball_yolo_folder, f'runs/detect/exp_{sample_folder_name}') 
-        left_balls, right_balls = get_coords_from_bbox(ball_detect_result_path, output_folder_path, dtype='ball')  
-    if FIND_LOGO_ON_BALL: 
-        # 最新預測結果路徑: runs/detect/predict{last}
-        logo_detect_result_path = os.path.join(logo_yolo_folder, f'runs/detect/predict_{sample_folder_name}') # 匹配以predict開頭的所有檔案或資料夾 
-        left_logos, right_logos = get_coords_from_bbox(logo_detect_result_path, output_folder_path, dtype='logo')  
+    mark_poly_label_path = f'{mark_yolo_folder}/runs/segment/predict/{all_sample_folder_name}/{sample_folder_name}/labels'
+    if EXTRACT_2D_POINTS:
+        all_2D_centers = extract_2D_points(mark_poly_label_path, all_bbox_xyxy)
+
+    LR_map = create_LR_map(all_2D_centers)
     # ----------------------------------------------------------------
     
     # ----------------------------------------------------------------
@@ -111,7 +106,7 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     if PICK_CORNERS:
         picker = CornerPicker([], output_folder_path)
-        picker.pick_corners(enhanced_folder_path)
+        picker.pick_corners(processed_folder_path)
         left_corners, right_corners = picker.left_corners, picker.right_corners
     # ----------------------------------------------------------------
 
@@ -127,6 +122,8 @@ if __name__ == '__main__':
         left_logos, right_logos = np.loadtxt('left_logos.txt'), np.loadtxt('right_logos.txt')
         os.chdir('..')
         os.chdir('..')
+
+
 
         print('🚀 計算3D座標中...')
         corners_3D = calc3D.myDLT(camParams, left_corners, right_corners)
