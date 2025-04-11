@@ -145,10 +145,10 @@ def scale_bounding_box(points, scale):
     height = (y2 - y1) * scale
 
     # 計算新的 x1, x2, y1, y2
-    new_x1 = cx - width / 2
-    new_x2 = cx + width / 2
-    new_y1 = cy - height / 2
-    new_y2 = cy + height / 2
+    new_x1 = int(cx - width / 2)
+    new_x2 = int(cx + width / 2)
+    new_y1 = int(cy - height / 2)
+    new_y2 = int(cy + height / 2)
 
     # 傳回放大後的新座標點
     return [
@@ -158,7 +158,17 @@ def scale_bounding_box(points, scale):
         (new_x1, new_y2)
     ]
 
-def crop_bbox(img_folder, ball_bbox_label_path, output_folder, image_width=1440, image_height=1080, scale=2, bbox_width=128, bbox_height=128):
+def bbox_edge_constraint(bbox_corners, image_width=1440, image_height=1080):
+    x1, y1 = bbox_corners[0]   # 放大後的 bbox xy
+    x2, y2 = bbox_corners[2]   # 放大後的 bbox xy
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(image_width, x2)
+    y2 = min(image_height, y2)
+    return (x1, y1, x2, y2)
+
+def crop_bbox(img_folder, ball_bbox_label_path, output_folder, 
+              image_width=1440, image_height=1080, scale=2, bbox_width=128, bbox_height=128):
     """
     all_bbox_xyxy = {
                         "label_file1.txt": (x1, y1, x2, y2), 
@@ -166,13 +176,12 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder, image_width=1440,
                         ...
                     }
     """
-    
     print('🚀 裁切所有影像的 bbox ...')
     ball_label_files = os.listdir(ball_bbox_label_path)
     filtered_ball_label_files = filter_lr_files(ball_label_files)  # 過濾只保留同時擁有 L 和 R 的檔案
 
     all_bbox_xyxy = {}
-    for label_file_name in filtered_ball_label_files:
+    for label_file_name in tqdm(filtered_ball_label_files):
         label_path = os.path.join(ball_bbox_label_path, label_file_name)    # 讀取影像中的 bbox labels
         ball_label_data = read_bbox_labels(label_path)  
         ball_label_data_pixel_coords = convert_to_pixel_coords(ball_label_data, image_width, image_height)  # 轉換並加入pixel_polygon
@@ -180,8 +189,9 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder, image_width=1440,
         ball_bbox_corners = ball_label_data_best_pixel_coords[0]["pixel_polygon"]    # [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
 
         scaled_ball_bbox_corners = scale_bounding_box(ball_bbox_corners, scale)
-        x1, y1, x2, y2 = scaled_ball_bbox_corners[0], scaled_ball_bbox_corners[2]   # 放大後的 bbox xy
+        x1, y1, x2, y2 = bbox_edge_constraint(scaled_ball_bbox_corners)
         all_bbox_xyxy[label_file_name] = (x1, y1, x2, y2)
+        # print((x1, y1, x2, y2))
         
         img_file_name = label_file_name.split('.')[0] + '.jpg'
         img_path = os.path.join(img_folder, img_file_name)
@@ -247,9 +257,9 @@ def create_LR_map(all_2D_centers):
     """
     all_2D_centers = {
                         "image-0000_L.txt": {0: (ball_center_x, ball_center_y), 
-                                                1: (mark_o_center_x, mark_o_center_y)}, 
+                                             1: (mark_o_center_x, mark_o_center_y)}, 
                         "image-0001_R.txt": {0: (ball_center_x, ball_center_y), 
-                                                2: (mark_x_center_x, mark_x_center_y)}, 
+                                             2: (mark_x_center_x, mark_x_center_y)}, 
                         "image-0002_L.txt": {0: (ball_center_x, ball_center_y)}, 
                         "image-0002_R.txt": {0: (ball_center_x, ball_center_y)}, 
                         ...

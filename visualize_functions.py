@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import plotly.graph_objects as go
+import plotly.io as pio
+import random
 
 def draw_spin_axis(translated_logos, plane_normal):
     # 生成擬合平面
@@ -135,41 +137,66 @@ def plot_trajectory_with_spin(traj_3D, plane_normal, best_rps, save_path):
     # 儲存為 HTML 檔案
     fig.write_html(save_path)
 
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from mpl_toolkits.mplot3d import Axes3D
+def plot_multiple_3d_trajectories_with_plane(traj_list_3D, corners_3D, output_html='multi_traj_plot.html'):
+    """
+    Parameters:
+        traj_list_3D: List of trajectories, each trajectory is a list of (x, y, z) tuples.
+                      e.g., [[(x1,y1,z1), (x2,y2,z2)], [(x3,y3,z3), (x4,y4,z4)], ...]
+        corners_3D: List of 4 (x, y, z) tuples forming a rectangle.
+        output_html: Output file path for the interactive Plotly HTML.
+    """
+    fig = go.Figure()
 
-# def plot_trajectory_with_spin(traj_3D, plane_normal, best_rps, save_path):
-#     """
-#     使用 Matplotlib 繪製軌跡，並在每個點上標示旋轉速度 (RPS)。
-    
-#     :param traj_3D: 桌球的 3D 軌跡 (numpy array)
-#     :param plane_normal: 旋轉平面的法向量 (numpy array)
-#     :param best_rps: 最佳匹配的旋轉速度 (float)
-#     :param save_path: 儲存圖片的路徑
-#     """
-#     fig = plt.figure(figsize=(8, 8))
-#     ax = fig.add_subplot(111, projection='3d')
-    
-#     # 繪製桌球軌跡
-#     ax.plot(traj_3D[:, 0], traj_3D[:, 1], traj_3D[:, 2], 'k-', linewidth=3, label="Ball Trajectory")
-    
-#     # 在每個點上標示旋轉速度方向
-#     for i in range(len(traj_3D)):
-#         pos = traj_3D[i]
-#         spin_vector = best_rps * plane_normal  # 旋轉速度向量
-        
-#         ax.quiver(pos[0], pos[1], pos[2], 
-#                   spin_vector[0], spin_vector[1], spin_vector[2], 
-#                   color='blue', length=0.1, normalize=True)
-    
-#     # 設定圖表標籤
-#     ax.set_xlabel("X Position (m)")
-#     ax.set_ylabel("Y Position (m)")
-#     ax.set_zlabel("Z Position (m)")
-#     ax.set_title("Table Tennis Ball Trajectory with Spin Vectors")
-#     ax.legend()
-    
-#     # 儲存圖片
-#     # plt.savefig(save_path, dpi=300, bbox_inches='tight')
-#     plt.show()
+    # 繪製每一條軌跡
+    for idx, traj in enumerate(traj_list_3D):
+        x, y, z = zip(*traj)
+        color = f'rgb({random.randint(30,150)}, {random.randint(30,150)}, {random.randint(30,150)})'
+
+        fig.add_trace(go.Scatter3d(
+            x=x, y=y, z=z,
+            mode='markers',
+            # mode='lines+markers',
+            line=dict(color=color, width=4),
+            marker=dict(size=3),
+            name=f'Trajectory {idx+1}'
+        ))
+
+    # 畫矩形平面
+    x_corners, y_corners, z_corners = zip(*corners_3D)
+    x_plane = list(x_corners) + [x_corners[0]]
+    y_plane = list(y_corners) + [y_corners[0]]
+    z_plane = list(z_corners) + [z_corners[0]]
+
+    fig.add_trace(go.Mesh3d(
+        x=x_corners,
+        y=y_corners,
+        z=z_corners,
+        i=[0, 0],
+        j=[1, 2],
+        k=[2, 3],
+        color='lightgreen',
+        opacity=0.5,
+        name='Rectangle Plane'
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=x_plane,
+        y=y_plane,
+        z=z_plane,
+        mode='lines',
+        line=dict(color='green', width=6),
+        name='Rectangle Edge'
+    ))
+
+    fig.update_layout(
+        title='Multiple 3D Trajectories with Reference Plane',
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='Z'
+        ),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+
+    pio.write_html(fig, file=output_html, auto_open=True)
+    print(f"✅ 已輸出至：{output_html}")

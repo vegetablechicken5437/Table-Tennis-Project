@@ -5,23 +5,23 @@ from image_processor import *
 from label_processer import *
 from yolo_runner import *
 from pick_corners import CornerPicker
-import calculation_3D as calc3D
+from calculation_3D import *
 from scipy.ndimage import gaussian_filter1d
-from spin_calculation import fit_spin_axis, calc_candidate_spin_rates, compute_trajectory_aero, find_best_matching_rps
-from visualize_functions import draw_trajectories, plot_trajectory_with_spin, draw_spin_axis
+from spin_calculation import *
+from visualize_functions import *
 
 PROCESS_IMAGE = False
 CREATE_VIDEO = False
 TRAIN = {'Ball':False, 'Logo':False}
-INFERENCE = {'Ball':False, 'Logo':True}
-CROP_BBOX = False
-EXTRACT_2D_POINTS = False
+INFERENCE = {'Ball':False, 'Logo':False}
+CROP_BBOX = True
+EXTRACT_2D_POINTS = True
 PICK_CORNERS = False
-CALCULATE_3D = False
+CALCULATE_3D = True
 CALCULATE_SPIN_RATE = False
 
-all_sample_folder_name = '0401'
-sample_folder_name = '20250401_203921'
+all_sample_folder_name = '0408'
+sample_folder_name = '20250408_193842'
 
 ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
@@ -30,8 +30,9 @@ os.makedirs(processed_img_folder_path, exist_ok=True)
 ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':50}
 mark_yolo_params = {'img_size':128, 'batch':16, 'epochs':100}
 
-output_folder_path = os.path.join('OUTPUT', all_sample_folder_name, sample_folder_name)
-os.makedirs(output_folder_path, exist_ok=True)
+output_folder_path = os.path.join('OUTPUT', all_sample_folder_name)
+output_sample_folder_path = os.path.join('OUTPUT', all_sample_folder_name, sample_folder_name)
+os.makedirs(output_sample_folder_path, exist_ok=True)
 
 camParamsPath = "CameraCalibration/STEREO_IMAGES/cvCalibration_result.txt"
 
@@ -71,8 +72,9 @@ if __name__ == '__main__':
     # Step 3: YOLO偵測桌球(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
     ball_yolo_folder = 'BallDetection_YOLOv5/yolov5'
-    # ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, ori_img_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
-    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, processed_folder_path, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
+    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, processed_folder_path, 
+                          all_sample_folder_name, sample_folder_name, 
+                          TRAIN, INFERENCE)
     # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
@@ -89,7 +91,9 @@ if __name__ == '__main__':
     # Step 5: YOLO偵測Logo(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
     mark_yolo_folder = 'LogoDetection_YOLOv8'
-    logo_detection_yolov8(mark_yolo_folder, mark_yolo_params, cropped_balls_folder, all_sample_folder_name, sample_folder_name, TRAIN, INFERENCE)
+    logo_detection_yolov8(mark_yolo_folder, mark_yolo_params, cropped_balls_folder, 
+                          all_sample_folder_name, sample_folder_name, 
+                          TRAIN, INFERENCE)
 
     # ----------------------------------------------------------------
     # Step 6: 輸出球和logo在影像上的座標(每個frame都有左、右影像的球座標)
@@ -113,34 +117,80 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     # Step 7: # 計算3D座標
     # ----------------------------------------------------------------
+    """
+    all_2D_centers = {
+                        "image-0000_L.txt": {0: (ball_center_x, ball_center_y), 
+                                             1: (mark_o_center_x, mark_o_center_y)}, 
+                        "image-0001_R.txt": {0: (ball_center_x, ball_center_y), 
+                                             2: (mark_x_center_x, mark_x_center_y)}, 
+                        "image-0002_L.txt": {0: (ball_center_x, ball_center_y)}, 
+                        "image-0002_R.txt": {0: (ball_center_x, ball_center_y)}, 
+                        ...
+                     }
+
+    LR_map = {
+                "image-0000": {"L": "image-0000_L.txt", "R": _______None_______},
+                "image-0001": {"L": _______None_______, "R": "image-0001_R.txt"},
+                "image-0002": {"L": "image-0002_L.txt", "R": "image-0002_R.txt"}
+                ...
+             }
+
+    valid_LR_ball_centers = [
+                                {"L": (L_ball_center_x, L_ball_center_y), "R": (R_ball_center_x, R_ball_center_y)}, 
+                                {"L": (L_ball_center_x, L_ball_center_y), "R": (R_ball_center_x, R_ball_center_y)}, 
+                                ...
+                            ]
+
+    valid_LR_centers = [
+                           {
+                               "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_x": (L_mark_x_center_x, L_mark_x_center_y)}, 
+                               "R": {"ball": (R_ball_center_x, R_ball_center_y)}
+                           }, 
+
+                           {
+                               "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (L_mark_o_center_x, L_mark_o_center_y)}, 
+                               "R": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (R_mark_o_center_x, R_mark_o_center_y)}
+                           }, 
+
+                           {
+                               "L": {"ball": (L_ball_center_x, L_ball_center_y)}, 
+                               "R": {"ball": (R_ball_center_x, R_ball_center_y)}
+                           }, 
+
+                           ...
+                       ]
+    """
+    
     if CALCULATE_3D:
-        camParams = calc3D.read_calibration_file(camParamsPath)
+        camParams = read_calibration_file(camParamsPath)
 
-        os.chdir(output_folder_path)
-        left_corners, right_corners = np.loadtxt('left_corners.txt'), np.loadtxt('right_corners.txt')
-        left_balls, right_balls = np.loadtxt('left_balls.txt'), np.loadtxt('right_balls.txt')
-        left_logos, right_logos = np.loadtxt('left_logos.txt'), np.loadtxt('right_logos.txt')
-        os.chdir('..')
-        os.chdir('..')
-
-
+        # left_balls, right_balls = get_valid_LR_ball_centers(LR_map, all_2D_centers)
+        lb, rb, lmo, rmo, lmx, rmx = get_LR_centers_with_marks(LR_map, all_2D_centers)
 
         print('🚀 計算3D座標中...')
-        corners_3D = calc3D.myDLT(camParams, left_corners, right_corners)
-
-        traj_3D = calc3D.myDLT(camParams, left_balls, right_balls)
-        # traj_3D = gaussian_filter1d(traj_3D, sigma=2, axis=0)
-        logos_3D = calc3D.myDLT(camParams, left_logos, right_logos)  # logo 2D座標是根據裁切影像
+        left_corners, right_corners = np.loadtxt(f'{output_folder_path}/left_corners.txt'), np.loadtxt(f'{output_folder_path}/right_corners.txt')
         
-        corners_3D_path = f'{output_folder_path}/corners_3D.txt'
-        # np.savetxt(corners_3D_path, corners_3D)
-        calc3D.changeCoordSys(corners_3D, corners_3D, corners_3D_path)
+        corners_3D = myDLT(camParams, left_corners, right_corners)
+        traj_3D = myDLT(camParams, lb, rb)
+        marks_3D = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx)
 
-        traj_3D_path = f'{output_folder_path}/traj_3D.txt'
-        calc3D.changeCoordSys(corners_3D, traj_3D, traj_3D_path)
-        
-        logos_3D_path = f'{output_folder_path}/logos_3D.txt'
-        calc3D.changeCoordSys(corners_3D, logos_3D, logos_3D_path)
+        # 轉換為自訂的坐標系
+        corners_3D_transformed, _ = transform_coord_system(corners_3D, corners_3D)
+        traj_3D_transformed, _ = transform_coord_system(traj_3D, corners_3D)
+        marks_3D_transformed, _ = transform_coord_system(marks_3D, corners_3D)
+
+        # 套用Kalman Filter做平滑
+        traj_3D_transformed_KF = simple_kalman_filter_3d(traj_3D_transformed, R=25.0, Q=1.0)
+
+        np.savetxt(f'{output_folder_path}/corners_3D.txt', corners_3D_transformed)
+        np.savetxt(f'{output_sample_folder_path}/traj_3D.txt', traj_3D_transformed)
+        np.savetxt(f'{output_sample_folder_path}/marks_3D.txt', marks_3D_transformed)
+
+        # 利用球體方程式 可以只用單邊2D標記推算3D標記位置
+        # 落點判斷
+
+        traj_list = [traj_3D_transformed, traj_3D_transformed_KF, marks_3D_transformed]
+        plot_multiple_3d_trajectories_with_plane(traj_list, corners_3D_transformed, 'test_multi_traj.html')
 
     # ----------------------------------------------------------------
     # Step 8: # 計算旋轉速度

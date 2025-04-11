@@ -74,15 +74,15 @@ def createVideo(image_folder_path, output_video_path, fps=30):
 # === 主程式 ===
 if __name__ == "__main__":
 
-    ori_img_folder_path = 'TEMP'
-    output_folder_path = 'TEMP_EN'
+    # ori_img_folder_path = 'TEMP'
+    # output_folder_path = 'TEMP_EN'
 
-    for i, image_file_name in enumerate(tqdm(os.listdir(ori_img_folder_path))):
-        image_path = os.path.join(ori_img_folder_path, image_file_name)
-        img = cv2.imread(image_path)
-        enhanced = enhance_image(img, 2, 30)
-        cv2.imwrite(f"{output_folder_path}/{i}.jpg", enhanced)
+    # for i, image_file_name in enumerate(tqdm(os.listdir(ori_img_folder_path))):
+    #     image_path = os.path.join(ori_img_folder_path, image_file_name)
+    #     img = cv2.imread(image_path)
+    #     enhanced = enhance_image(img, 2, 30)
+    #     cv2.imwrite(f"{output_folder_path}/{i}.jpg", enhanced)
 
-    # image_folder_path = 'samples'
-    # output_video_path = 'demo_video.mp4'
-    # createVideo(image_folder_path, output_video_path, fps=30)
+    image_folder_path = 'samples'
+    output_video_path = 'demo_video.mp4'
+    createVideo(image_folder_path, output_video_path, fps=30)
