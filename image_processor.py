@@ -71,6 +71,127 @@ def createVideo(image_folder_path, output_video_path, fps=30):
     # 釋放影片寫入器
     video.release()
 
+def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path, output_path, fps=30, total_frames=500):
+    frame_width, frame_height = 1440, 1080
+    display_width, display_height = frame_width // 2, frame_height // 2  # 720x540
+    video_width = display_width * 2  # 1440
+    video_height = display_height  # 540
+    small_img_size = (frame_width // 10, frame_width // 10)  # 144x144
+    ignore_rate = 0.05
+
+    # 初始化 VideoWriter
+    video_writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        fps,
+        (video_width, video_height)
+    )
+
+    print(f'🚀 輸出影片: {output_path} ')
+    for frame_num in tqdm(range(total_frames)):
+        frame_str = f"{frame_num:04d}"
+        name_L = f"image-{frame_str}_L.jpg"
+        name_R = f"image-{frame_str}_R.jpg"
+
+        # 讀取主圖並縮小
+        path_L = os.path.join(ball_bbox_img_path, name_L)
+        path_R = os.path.join(ball_bbox_img_path, name_R)
+
+        img_L = cv2.imread(path_L)
+        img_R = cv2.imread(path_R)
+
+        if img_L is None or img_R is None:
+            print(f"Frame {frame_str} not found in ball_bbox_label_path.")
+            continue
+
+        img_L = cv2.resize(img_L, (display_width, display_height))
+        img_R = cv2.resize(img_R, (display_width, display_height))
+
+        combined_img = np.hstack((img_L, img_R))
+
+        # 加入 frame number（白字、粗體、置中頂部）
+        cv2.putText(
+            combined_img,
+            frame_str,
+            (video_width // 2 - 50, 30),  # 大約置中
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA
+        )
+
+        # 🟨 畫黃色方框
+        box_margin_x = int(display_width * ignore_rate)
+        box_margin_y = int(display_height * ignore_rate)
+        box_width = display_width - 2 * box_margin_x
+        box_height = display_height - 2 * box_margin_y
+
+        # 左畫面
+        top_left_L = (box_margin_x, box_margin_y)
+        bottom_right_L = (box_margin_x + box_width, box_margin_y + box_height)
+        cv2.rectangle(combined_img, top_left_L, bottom_right_L, (0, 255, 255), 2)
+
+        # 右畫面
+        offset = display_width
+        top_left_R = (offset + box_margin_x, box_margin_y)
+        bottom_right_R = (offset + box_margin_x + box_width, box_margin_y + box_height)
+        cv2.rectangle(combined_img, top_left_R, bottom_right_R, (0, 255, 255), 2)
+
+        # 小圖：左上角與右上角
+        small_L_path = os.path.join(mark_poly_img_path, name_L)
+        small_R_path = os.path.join(mark_poly_img_path, name_R)
+
+        if os.path.exists(small_L_path) and (name_L.split('.')[0] + '.txt' in all_2D_centers.keys()):
+            small_L = cv2.imread(small_L_path)
+            small_L = cv2.resize(small_L, small_img_size)
+        else:
+            small_L = np.zeros((small_img_size[1], small_img_size[0], 3), dtype=np.uint8)
+
+        if os.path.exists(small_R_path) and (name_R.split('.')[0] + '.txt' in all_2D_centers.keys()):
+            small_R = cv2.imread(small_R_path)
+            small_R = cv2.resize(small_R, small_img_size)
+        else:
+            small_R = np.zeros((small_img_size[1], small_img_size[0], 3), dtype=np.uint8)
+
+        # 將小圖貼上去
+        combined_img[0:small_img_size[1], 0:small_img_size[0]] = small_L
+        combined_img[0:small_img_size[1], -small_img_size[0]:] = small_R
+
+        # 🔲 小圖畫黃色方框
+        margin_x_s = small_img_size[0] // 10
+        margin_y_s = small_img_size[1] // 10
+        box_w_s = small_img_size[0] - 2 * margin_x_s
+        box_h_s = small_img_size[1] - 2 * margin_y_s
+
+        # 左上角小圖框（左上為(0,0)）
+        top_left_s_L = (margin_x_s, margin_y_s)
+        bottom_right_s_L = (margin_x_s + box_w_s, margin_y_s + box_h_s)
+        cv2.rectangle(
+            combined_img,
+            top_left_s_L,
+            bottom_right_s_L,
+            (0, 255, 255),
+            2
+        )
+
+        # 右上角小圖框（從右上 corner 開始算）
+        top_left_s_R = (video_width - small_img_size[0] + margin_x_s, margin_y_s)
+        bottom_right_s_R = (video_width - small_img_size[0] + margin_x_s + box_w_s, margin_y_s + box_h_s)
+        cv2.rectangle(
+            combined_img,
+            top_left_s_R,
+            bottom_right_s_R,
+            (0, 255, 255),
+            2
+        )
+
+        # 寫入影片
+        video_writer.write(combined_img)
+
+    video_writer.release()
+    print(f"影片輸出完成：{output_path}")
+
 # === 主程式 ===
 if __name__ == "__main__":
 
@@ -83,6 +204,12 @@ if __name__ == "__main__":
     #     enhanced = enhance_image(img, 2, 30)
     #     cv2.imwrite(f"{output_folder_path}/{i}.jpg", enhanced)
 
-    image_folder_path = 'samples'
-    output_video_path = 'demo_video.mp4'
-    createVideo(image_folder_path, output_video_path, fps=30)
+    # image_folder_path = 'samples'
+    # output_video_path = 'demo_video.mp4'
+    # createVideo(image_folder_path, output_video_path, fps=30)
+
+    generate_verify_video(
+        ball_bbox_label_path=r"C:\Users\jason\Desktop\TableTennisProject\BallDetection_YOLOv5\yolov5\runs\detect\0412\exp_20250412_152132",
+        mark_poly_label_path=r"C:\Users\jason\Desktop\TableTennisProject\LogoDetection_YOLOv8\runs\segment\predict\0412\20250412_152132",
+        output_path='output_video.mp4'
+    )

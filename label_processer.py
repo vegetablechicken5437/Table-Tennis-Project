@@ -3,7 +3,6 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from typing import Tuple
 
 # 讀取 polygon 格式 ===
 def read_poly_labels(label_path):
@@ -91,26 +90,29 @@ def select_max_conf_by_class(label_data):
             best_by_class[cls_id] = item
     return best_by_class
 
-# 計算幾何中心（moments） ===
-def compute_polygon_center(label_data):
+# 計算最小外接圓的圓心 ===
+def compute_enclosing_circle_center(label_data):
     """
     label_data = [
                     {"class_id": <id1>, "confidence": <conf1>, "polygon": <polygon1>, "pixel_polygon": ..., "center":...}, 
                     {"class_id": <id2>, "confidence": <conf2>, "polygon": <polygon2>, "pixel_polygon": ..., "center":...}, 
                     ...
                  ]
+    計算每個 polygon 的最小外接圓中心點，儲存在 item["center"] 中。
     """
     for item in label_data:
-        contour = np.array(item["pixel_polygon"], dtype=np.int32).reshape((-1, 1, 2))
-        M = cv2.moments(contour)
-        if M["m00"] != 0:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-            item["center"] = (cx, cy)
-        else:
-            item["center"] = (None, None)
+        # 取得輪廓點並轉為 numpy 格式
+        contour = np.array(item["pixel_polygon"], dtype=np.int32)
+
+        # 計算最小外接圓
+        (x, y), radius = cv2.minEnclosingCircle(contour)
+        center = (int(x), int(y))
+
+        # 儲存中心點
+        item["center"] = center
     return label_data
 
+# 過濾只保留同時擁有 L 和 R 的檔案
 def filter_lr_files(files):
     """
     過濾只保留同時擁有 L 和 R 的檔案
@@ -131,7 +133,7 @@ def filter_lr_files(files):
     # 只保留屬於 valid_numbers 的檔案
     return [file for file in files if file.split('_')[0] in valid_numbers]
 
-def scale_bounding_box(points, scale):
+def scale_bounding_box(points, scale=2):
     # 解包原始座標
     x1, y1 = points[0]
     x2, y2 = points[2]
@@ -158,6 +160,7 @@ def scale_bounding_box(points, scale):
         (new_x1, new_y2)
     ]
 
+# bbox 若超出圖片邊界 則限制在邊界內
 def bbox_edge_constraint(bbox_corners, image_width=1440, image_height=1080):
     x1, y1 = bbox_corners[0]   # 放大後的 bbox xy
     x2, y2 = bbox_corners[2]   # 放大後的 bbox xy
@@ -167,6 +170,34 @@ def bbox_edge_constraint(bbox_corners, image_width=1440, image_height=1080):
     y2 = min(image_height, y2)
     return (x1, y1, x2, y2)
 
+# 忽略在圖片邊界的 bbox
+def bbox_loc_constraint(label_data_pixel_coords, image_width=1440, image_height=1080, ignore_rate=0.05):
+    """
+    label_data = [
+                    {"class_id": <id1>, "confidence": <conf1>, "polygon": <polygon1>, "pixel_polygon": ...}, 
+                    {"class_id": <id2>, "confidence": <conf2>, "polygon": <polygon2>, "pixel_polygon": ...}, 
+                    ...
+                 ]
+    """
+    borders = [
+                  int(image_width * ignore_rate), 
+                  int(image_height * ignore_rate), 
+                  int(image_width - image_width * ignore_rate), 
+                  int(image_height - image_height * ignore_rate)
+              ]
+    # print(borders)
+    filtered_label_data_pixel_coords = []
+
+    # 檢查每個 label 的 pixel polygon 確認是否每個點都在定義的邊界範圍內 若超過邊界 忽略該label
+    for label in label_data_pixel_coords:
+        for x, y in label["pixel_polygon"]: 
+            if not (x > borders[0] and y > borders[1] and x < borders[2] and y < borders[3]):
+                return []
+        filtered_label_data_pixel_coords.append(label)
+
+    return filtered_label_data_pixel_coords
+
+# 裁切並儲存所有 bbox
 def crop_bbox(img_folder, ball_bbox_label_path, output_folder, 
               image_width=1440, image_height=1080, scale=2, bbox_width=128, bbox_height=128):
     """
@@ -185,6 +216,12 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
         label_path = os.path.join(ball_bbox_label_path, label_file_name)    # 讀取影像中的 bbox labels
         ball_label_data = read_bbox_labels(label_path)  
         ball_label_data_pixel_coords = convert_to_pixel_coords(ball_label_data, image_width, image_height)  # 轉換並加入pixel_polygon
+        ball_label_data_pixel_coords = bbox_loc_constraint(ball_label_data_pixel_coords)  # 篩選在定義邊界範圍內的 bbox
+
+        # 所有 label 的 pixel polygon 都超出定義邊界
+        if ball_label_data_pixel_coords == []:
+            continue
+
         ball_label_data_best_pixel_coords = select_max_conf_by_class(ball_label_data_pixel_coords)    # 篩選最大 conf 的 label
         ball_bbox_corners = ball_label_data_best_pixel_coords[0]["pixel_polygon"]    # [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
 
@@ -211,7 +248,7 @@ def map_point_back_to_ori_image(point_in_crop, bbox_xyxy, bbox_width=128, bbox_h
     bbox_width_ori, bbox_height_ori = abs(int(x2-x1)), abs(int(y2-y1))
     x_in_ori = x1 + point_in_crop[0] * (bbox_width_ori/bbox_width)
     y_in_ori = y1 + point_in_crop[1] * (bbox_height_ori/bbox_height)
-    return (x_in_ori, y_in_ori)
+    return (int(x_in_ori), int(y_in_ori))
 
 def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_height=128):
     """
@@ -230,22 +267,32 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
     for label_file_name in mark_label_files:
         label_path = os.path.join(mark_poly_label_path, label_file_name)
         mark_label_data = read_poly_labels(label_path)
-        mark_label_data_pixel_coords = convert_to_pixel_coords(mark_label_data, bbox_width, bbox_height)
-        mark_label_data_pixel_coords_centers = compute_polygon_center(mark_label_data_pixel_coords)   # 加入['center']到各label的字典
+        mark_label_data_pixel_coords = convert_to_pixel_coords(mark_label_data, bbox_width, bbox_height)    # 轉換並加入pixel_polygon
+        mark_label_data_pixel_coords_centers = compute_enclosing_circle_center(mark_label_data_pixel_coords)   # 加入['center']到各label的字典
+        mark_label_data_pixel_coords_centers = bbox_loc_constraint(mark_label_data_pixel_coords_centers, 
+                                                                   image_width=128, image_height=128, ignore_rate=0.05)
+
+        # 所有 label 的 pixel polygon 都超出定義邊界
+        if mark_label_data_pixel_coords_centers == []:
+            continue
+        
         mark_label_data_best_pixel_coords_centers = select_max_conf_by_class(mark_label_data_pixel_coords_centers)    # 分別找出最大 conf 的 ball, mark_o, mark_x 的 label
         
         # label_map = {0: "ball", 1: "mark_o", 2: "mark_x"}
+        if label_file_name not in all_bbox_xyxy.keys():
+            continue
+
         bbox_xyxy = all_bbox_xyxy[label_file_name]
         centers_map = {}
-        if 0 in mark_label_data_best_pixel_coords_centers.keys():
+        if 0 in mark_label_data_best_pixel_coords_centers.keys() and mark_label_data_best_pixel_coords_centers[0]["pixel_polygon"] != []:
             ball_center_in_crop = mark_label_data_best_pixel_coords_centers[0]["center"]
             ball_center = map_point_back_to_ori_image(ball_center_in_crop, bbox_xyxy)
             centers_map[0] = ball_center
-        if 1 in mark_label_data_best_pixel_coords_centers.keys():
+        if 1 in mark_label_data_best_pixel_coords_centers.keys() and mark_label_data_best_pixel_coords_centers[1]["pixel_polygon"] != []:
             mark_o_center_in_crop = mark_label_data_best_pixel_coords_centers[1]["center"]
             mark_o_center = map_point_back_to_ori_image(mark_o_center_in_crop, bbox_xyxy)
             centers_map[1] = mark_o_center
-        if 2 in mark_label_data_best_pixel_coords_centers.keys():
+        if 2 in mark_label_data_best_pixel_coords_centers.keys() and mark_label_data_best_pixel_coords_centers[2]["pixel_polygon"] != []:
             mark_x_center_in_crop = mark_label_data_best_pixel_coords_centers[2]["center"]
             mark_x_center = map_point_back_to_ori_image(mark_x_center_in_crop, bbox_xyxy)
             centers_map[2] = mark_x_center
@@ -272,12 +319,12 @@ def create_LR_map(all_2D_centers):
     """
     LR_map = {}
     for filename in all_2D_centers.keys():
-        if '_L.txt' in filename:
+        if '_L.txt' in filename and 0 in all_2D_centers[filename].keys():
             base = filename.replace('_L.txt', '')
             if base not in LR_map:
                 LR_map[base] = {"L": None, "R": None}
             LR_map[base]["L"] = filename
-        elif '_R.txt' in filename:
+        elif '_R.txt' in filename and 0 in all_2D_centers[filename].keys():
             base = filename.replace('_R.txt', '')
             if base not in LR_map:
                 LR_map[base] = {"L": None, "R": None}

@@ -15,7 +15,6 @@ def ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, input_folder, all_
     def get_last_exp_folder(path):
         exps = [d for d in os.listdir(path) if d.startswith('exp') and os.path.isdir(os.path.join(path, d))]
         exps = sorted(exps, key=lambda x: int(x[3:]) if x[3:].isdigit() else float('-inf'))
-        # print(exps)
         return os.path.join(path, exps[-1]) if exps else None
 
     latest_exp_folder = get_last_exp_folder(train_result_folder)
@@ -40,7 +39,6 @@ def logo_detection_yolov8(logo_yolo_folder, logo_yolo_params, input_folder, all_
     def get_last_train_folder(path):
         trains = [d for d in os.listdir(path) if d.startswith('train') and os.path.isdir(os.path.join(path, d))]
         trains = sorted(trains, key=lambda x: int(x[3:]) if x[3:].isdigit() else float('-inf'))
-        print(trains)
         return os.path.join(path, trains[-1]) if trains else None
 
     latest_train_folder = get_last_train_folder(detect_folder)

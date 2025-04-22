@@ -1,33 +1,37 @@
 import os
 import cv2
 import numpy as np
+import json
 from image_processor import *
 from label_processer import *
 from yolo_runner import *
 from pick_corners import CornerPicker
 from calculation_3D import *
-from scipy.ndimage import gaussian_filter1d
-from spin_calculation import *
+from traj_processor import *
+# from spin_calculation import *
+from spin_axis_calculation_new import *
+from spin_rate_calculation_new import *
 from visualize_functions import *
 
 PROCESS_IMAGE = False
 CREATE_VIDEO = False
 TRAIN = {'Ball':False, 'Logo':False}
 INFERENCE = {'Ball':False, 'Logo':False}
-CROP_BBOX = True
+CROP_BBOX = False
 EXTRACT_2D_POINTS = True
 PICK_CORNERS = False
+GEN_VERIFY_VIDEO = False
 CALCULATE_3D = True
 CALCULATE_SPIN_RATE = False
 
-all_sample_folder_name = '0408'
-sample_folder_name = '20250408_193842'
+all_sample_folder_name = '0415'
+sample_folder_name = '20250415_193043'
 
 ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
 os.makedirs(processed_img_folder_path, exist_ok=True) 
 
-ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':50}
+ball_yolo_params = {'img_size':640, 'batch':16, 'epochs':100}
 mark_yolo_params = {'img_size':128, 'batch':16, 'epochs':100}
 
 output_folder_path = os.path.join('OUTPUT', all_sample_folder_name)
@@ -36,9 +40,10 @@ os.makedirs(output_sample_folder_path, exist_ok=True)
 
 camParamsPath = "CameraCalibration/STEREO_IMAGES/cvCalibration_result.txt"
 
-fps = 225
+FPS = 225
 
 if __name__ == '__main__':
+
     # ----------------------------------------------------------------
     # Step 1 & 2: 分割影像(原始影像為左右合併)
     # ----------------------------------------------------------------
@@ -55,18 +60,27 @@ if __name__ == '__main__':
 
             img = cv2.imread(image_path)
             enhanced = enhance_image(img, 2, 30)
-            # img = cv2.bilateralFilter(img, 5, 0, 0)
             imgL, imgR = split_image(enhanced)
 
             # cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_EN.jpg"), enhanced)
             cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
             cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
-            cv2.imwrite(os.path.join(processed_L_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
-            cv2.imwrite(os.path.join(processed_R_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
 
-    if CREATE_VIDEO:
-        for folder_path in (processed_L_folder_path, processed_R_folder_path):
-            createVideo(folder_path, f'{folder_path.split('/')[-1]}.mp4', fps=20)
+            # cv2.imwrite(os.path.join(processed_L_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+            # cv2.imwrite(os.path.join(processed_R_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+
+    # if CREATE_VIDEO:
+    #     for folder_path in (processed_L_folder_path, processed_R_folder_path):
+    #         createVideo(folder_path, f'{folder_path.split('/')[-1]}.mp4', fps=20)
+
+    # ----------------------------------------------------------------
+    # Step 7: # 透過UI介面手動選取球桌四角，定義世界坐標系
+    # ----------------------------------------------------------------
+    if PICK_CORNERS:
+        picker = CornerPicker([], output_folder_path)
+        picker.pick_corners(processed_folder_path)
+        left_corners, right_corners = picker.left_corners, picker.right_corners
+    # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # Step 3: YOLO偵測桌球(可選擇是否訓練和預測)
@@ -80,12 +94,16 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     # Step 4: 裁切bounding box 並輸出裁切圖片
     # ----------------------------------------------------------------
-    ball_bbox_label_path = os.path.join(ball_yolo_folder, f'runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}/labels')    # 偵測結果資料夾(含多條軌跡的偵測結果)
+    ball_bbox_label_path = f'{ball_yolo_folder}/runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}/labels'    # 偵測結果資料夾(含多條軌跡的偵測結果)
     cropped_balls_folder = os.path.join('Cropped_Balls', all_sample_folder_name, sample_folder_name)
     os.makedirs(cropped_balls_folder, exist_ok=True)
     
     if CROP_BBOX:
         all_bbox_xyxy = crop_bbox(processed_folder_path, ball_bbox_label_path, cropped_balls_folder)
+        # print(all_bbox_xyxy)
+        with open(f"{output_sample_folder_path}/all_bbox_xyxy.json", "w") as fp:
+            json.dump(all_bbox_xyxy, fp)  
+        print(f"已儲存 {output_sample_folder_path}/all_bbox_xyxy.json")
 
     # ----------------------------------------------------------------
     # Step 5: YOLO偵測Logo(可選擇是否訓練和預測)
@@ -100,19 +118,15 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     mark_poly_label_path = f'{mark_yolo_folder}/runs/segment/predict/{all_sample_folder_name}/{sample_folder_name}/labels'
     if EXTRACT_2D_POINTS:
+        with open(f"{output_sample_folder_path}/all_bbox_xyxy.json", "r") as fp:
+            all_bbox_xyxy = json.load(fp)  
         all_2D_centers = extract_2D_points(mark_poly_label_path, all_bbox_xyxy)
 
-    LR_map = create_LR_map(all_2D_centers)
     # ----------------------------------------------------------------
-    
-    # ----------------------------------------------------------------
-    # Step 7: # 透過UI介面手動選取球桌四角，定義世界坐標系
-    # ----------------------------------------------------------------
-    if PICK_CORNERS:
-        picker = CornerPicker([], output_folder_path)
-        picker.pick_corners(processed_folder_path)
-        left_corners, right_corners = picker.left_corners, picker.right_corners
-    # ----------------------------------------------------------------
+    if GEN_VERIFY_VIDEO:
+        ball_bbox_img_path = os.path.join(ball_yolo_folder, f'runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}')
+        mark_poly_img_path = f'{mark_yolo_folder}/runs/segment/predict/{all_sample_folder_name}/{sample_folder_name}'
+        generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path, output_path= f'{output_sample_folder_path}/verify_video.mp4')
 
     # ----------------------------------------------------------------
     # Step 7: # 計算3D座標
@@ -134,45 +148,33 @@ if __name__ == '__main__':
                 "image-0002": {"L": "image-0002_L.txt", "R": "image-0002_R.txt"}
                 ...
              }
-
-    valid_LR_ball_centers = [
-                                {"L": (L_ball_center_x, L_ball_center_y), "R": (R_ball_center_x, R_ball_center_y)}, 
-                                {"L": (L_ball_center_x, L_ball_center_y), "R": (R_ball_center_x, R_ball_center_y)}, 
-                                ...
-                            ]
-
-    valid_LR_centers = [
-                           {
-                               "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_x": (L_mark_x_center_x, L_mark_x_center_y)}, 
-                               "R": {"ball": (R_ball_center_x, R_ball_center_y)}
-                           }, 
-
-                           {
-                               "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (L_mark_o_center_x, L_mark_o_center_y)}, 
-                               "R": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (R_mark_o_center_x, R_mark_o_center_y)}
-                           }, 
-
-                           {
-                               "L": {"ball": (L_ball_center_x, L_ball_center_y)}, 
-                               "R": {"ball": (R_ball_center_x, R_ball_center_y)}
-                           }, 
-
-                           ...
-                       ]
     """
     
     if CALCULATE_3D:
         camParams = read_calibration_file(camParamsPath)
+        # LR_map = create_LR_map(all_2D_centers)
+        # lb, rb, lmo, rmo, lmx, rmx = get_LR_centers_with_marks(LR_map, all_2D_centers)
 
-        # left_balls, right_balls = get_valid_LR_ball_centers(LR_map, all_2D_centers)
-        lb, rb, lmo, rmo, lmx, rmx = get_LR_centers_with_marks(LR_map, all_2D_centers)
+        lb, rb, lmo, rmo, lmx, rmx = extract_centers(all_2D_centers)
 
         print('🚀 計算3D座標中...')
-        left_corners, right_corners = np.loadtxt(f'{output_folder_path}/left_corners.txt'), np.loadtxt(f'{output_folder_path}/right_corners.txt')
+        left_corners = np.loadtxt(f'{output_folder_path}/left_corners.txt')
+        right_corners = np.loadtxt(f'{output_folder_path}/right_corners.txt')
         
         corners_3D = myDLT(camParams, left_corners, right_corners)
         traj_3D = myDLT(camParams, lb, rb)
-        marks_3D = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx)
+
+        # # 軌跡也需記錄掉幀情況
+        # print(traj_3D)
+        # input()
+
+
+
+
+        # traj_3D_filtered, _ = remove_outliers_by_dbscan(traj_3D, eps=10, min_samples=5)
+        # traj_3D_filtered, _ = remove_outliers_by_speed(traj_3D_filtered, max_speed_threshold=30)
+
+        marks_3D = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx)    # 根據球心座標和球面方程式計算標記3D座標
 
         # 轉換為自訂的坐標系
         corners_3D_transformed, _ = transform_coord_system(corners_3D, corners_3D)
@@ -180,81 +182,63 @@ if __name__ == '__main__':
         marks_3D_transformed, _ = transform_coord_system(marks_3D, corners_3D)
 
         # 套用Kalman Filter做平滑
-        traj_3D_transformed_KF = simple_kalman_filter_3d(traj_3D_transformed, R=25.0, Q=1.0)
+        traj_3D_transformed_KF = simple_kalman_filter_3d(traj_3D_transformed, FPS)
+
+        # 標記座標跟著平滑後的軌跡一起平移
+        diffs = traj_3D_transformed_KF - traj_3D_transformed
+        marks_3D_transformed = marks_3D_transformed + diffs
 
         np.savetxt(f'{output_folder_path}/corners_3D.txt', corners_3D_transformed)
-        np.savetxt(f'{output_sample_folder_path}/traj_3D.txt', traj_3D_transformed)
-        np.savetxt(f'{output_sample_folder_path}/marks_3D.txt', marks_3D_transformed)
+        np.savetxt(f'{output_sample_folder_path}/traj_3D_transformed.txt', traj_3D_transformed_KF)
+        np.savetxt(f'{output_sample_folder_path}/marks_3D_transformed.txt', marks_3D_transformed)
 
-        # 利用球體方程式 可以只用單邊2D標記推算3D標記位置
-        # 落點判斷
+        collisions = detect_table_tennis_collisions(traj_3D_transformed_KF, corners_3D_transformed)
+        traj_3D_segs = split_trajectory_by_collisions(traj_3D_transformed, collisions)
+        marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
 
-        traj_list = [traj_3D_transformed, traj_3D_transformed_KF, marks_3D_transformed]
-        plot_multiple_3d_trajectories_with_plane(traj_list, corners_3D_transformed, 'test_multi_traj.html')
+        for i in range(len(traj_3D_segs)):
+            traj_list = [traj_3D_segs[i], marks_3D_segs[i]]
+            # traj_list = [traj_3D_segs[i], simple_kalman_filter_3d(traj_3D_segs[i], FPS), marks_3D_segs[i]]
+            plot_multiple_3d_trajectories_with_plane(traj_list, corners_3D_transformed, f'{output_sample_folder_path}/traj{i+1}.html')
 
     # ----------------------------------------------------------------
     # Step 8: # 計算旋轉速度
     # ----------------------------------------------------------------
     if CALCULATE_SPIN_RATE:
-        ball_frame_nums = np.loadtxt(f'{output_folder_path}/ball_frame_nums.txt', dtype=int)
-        logo_frame_nums = np.loadtxt(f'{output_folder_path}/logo_frame_nums.txt', dtype=int)
-        traj_3D = np.loadtxt(f'{output_folder_path}/traj_3D.txt')  # 完整球軌跡
-        logos_3D = np.loadtxt(f'{output_folder_path}/logos_3D.txt')  # 偵測到logo的3D點
 
-        if isinstance(logo_frame_nums, np.ndarray) and logo_frame_nums.size > 2:
+        # traj_3D = np.loadtxt(f"{output_sample_folder_path}/traj_3D_transformed.txt")
+        # marks_3D = np.loadtxt(f"{output_sample_folder_path}/marks_3D_transformed.txt")
 
-            # 計算旋轉軸
-            translated_logos, plane_normal = fit_spin_axis(ball_frame_nums, logo_frame_nums, traj_3D, logos_3D)
+        collisions = detect_table_tennis_collisions(traj_3D_transformed_KF, corners_3D_transformed)
+        traj_3D_segs = split_trajectory_by_collisions(traj_3D_transformed, collisions)
+        marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
 
-            # draw_spin_axis(translated_logos, plane_normal)
+        all_spin_axis = []
+        for i in range(len(traj_3D_segs)):
+            offsets = calc_offsets(traj_3D_segs[i], marks_3D_segs[i])
+            fig, spin_axis = fit_and_plot_offset_plane(offsets)
+            all_spin_axis.append(spin_axis)
 
-            # # 計算每一幀的速度 (忽略最後一幀)
-            # velocity = np.diff(traj_3D, axis=0, prepend=traj_3D[0].reshape(1, -1))
-            # # 計算旋轉軸的方向 (根據球的運動)
-            # rotation_axis = np.cross(velocity, plane_normal)
-            # # 確保法向量朝向正確
-            # if np.mean(np.dot(rotation_axis, plane_normal)) < 0:
-            #     plane_normal = -plane_normal  # 反轉法向量方向
+            spin_axis_graph_path = f"{output_sample_folder_path}/spin_axis_seg{i+1}.html"
+            pio.write_html(fig, file=spin_axis_graph_path, auto_open=False)
+            print(f"✅ 已輸出至：{spin_axis_graph_path}")
 
-            # 計算可能的四種角速度
-            rps_cw, rps_cw_extra, rps_ccw, rps_ccw_extra = calc_candidate_spin_rates(ball_frame_nums, logo_frame_nums, traj_3D, logos_3D, plane_normal)
+            rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list = calc_candidate_spin_rates(FPS, 
+                                                                                                         traj_3D_segs[i], 
+                                                                                                         marks_3D_segs[i], 
+                                                                                                         spin_axis)
+            print(rps_cw_list)
+            rps_cw = trimmed_mean_rps(rps_cw_list, trim_frac=0.1)
+            print(rps_cw)
 
-            print("\nRotation Axis (Plane Normal):", plane_normal)
-            print(f'CW: {rps_cw} rps')
-            print(f'CW_extra: {rps_cw_extra} rps')
-            print(f'CCW: {rps_ccw} rps')
-            print(f'CW_extra: {rps_ccw_extra} rps\n')
+            print(rps_cw_extra_list)
+            rps_cw_extra = trimmed_mean_rps(rps_cw_extra_list, trim_frac=0.1)
+            print(rps_cw_extra)
 
-            # 空氣動力學參數: [重力加速度 (m/s^2), 桌球質量 (kg), 空氣密度 (kg/m^3), 球的迎風面積 (m^2), 球半徑 (m), 阻力係數, 馬格努斯力係數]
-            aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
+            print(rps_ccw_list)
+            rps_ccw = trimmed_mean_rps(rps_ccw_list, trim_frac=0.1)
+            print(rps_ccw)
 
-            # 計算每一幀的速度 (Ground Truth)
-            dt_list = np.diff(ball_frame_nums) / fps  # 每一幀的時間間隔 (秒)
-            velocity_gt = np.diff(traj_3D, axis=0) * fps  # 速度計算
-            acceleration_gt = np.diff(velocity_gt, axis=0) * fps  # 加速度計算
-
-            # 設定模擬步數
-            num_steps = len(traj_3D)
-
-            # 計算四種旋轉條件的軌跡
-            trajectory_cw = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps_cw, dt_list, num_steps, plane_normal, aero_params)
-            trajectory_cw_extra = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps_cw_extra, dt_list, num_steps, plane_normal, aero_params)
-            trajectory_ccw = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps_ccw, dt_list, num_steps, plane_normal, aero_params)
-            trajectory_ccw_extra = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps_ccw_extra, dt_list, num_steps, plane_normal, aero_params)
-            
-            # 畫出可能的軌跡
-            candidate_trajectories_path = f'{output_folder_path}/candidate_trajectories.html'
-            draw_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, candidate_trajectories_path)
-            
-            # 建立字典
-            rps_dict = {"cw": rps_cw, "cw_extra": rps_cw_extra, "ccw": rps_ccw, "ccw_extra": rps_ccw_extra}
-            aero_trajectories = {"cw": trajectory_cw, "cw_extra": trajectory_cw_extra, "ccw": trajectory_ccw, "ccw_extra": trajectory_ccw_extra}
-
-            # 比對軌跡並找出最佳轉速
-            best_rps = find_best_matching_rps(traj_3D, aero_trajectories, rps_dict)
-            print(f'Best RPS: {best_rps} rps')
-            np.savetxt(f'{output_folder_path}/best_rps.txt', [best_rps])
-
-            # 畫出最終軌跡和轉速
-            traj_with_spin_path = f"{output_folder_path}/trajectory_with_spin.html"
-            plot_trajectory_with_spin(traj_3D, plane_normal, best_rps, traj_with_spin_path)
+            print(rps_ccw_extra_list)
+            rps_ccw_extra = trimmed_mean_rps(rps_ccw_extra_list, trim_frac=0.1)
+            print(rps_ccw_extra)

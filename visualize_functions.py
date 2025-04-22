@@ -145,12 +145,23 @@ def plot_multiple_3d_trajectories_with_plane(traj_list_3D, corners_3D, output_ht
         corners_3D: List of 4 (x, y, z) tuples forming a rectangle.
         output_html: Output file path for the interactive Plotly HTML.
     """
+    colors = [
+        (255, 0, 0),      # 紅色
+        (255, 127, 0),    # 橙色
+        (255, 255, 0),    # 黃色
+        (0, 255, 0),      # 綠色
+        (0, 0, 255),      # 藍色
+        (75, 0, 130),     # 靛色
+        (148, 0, 211)     # 紫色
+    ]
+
+
     fig = go.Figure()
 
     # 繪製每一條軌跡
     for idx, traj in enumerate(traj_list_3D):
         x, y, z = zip(*traj)
-        color = f'rgb({random.randint(30,150)}, {random.randint(30,150)}, {random.randint(30,150)})'
+        color = f'rgb({colors[idx][0]}, {colors[idx][1]}, {colors[idx][2]})'
 
         fig.add_trace(go.Scatter3d(
             x=x, y=y, z=z,
@@ -193,10 +204,28 @@ def plot_multiple_3d_trajectories_with_plane(traj_list_3D, corners_3D, output_ht
         scene=dict(
             xaxis_title='X',
             yaxis_title='Y',
-            zaxis_title='Z'
-        ),
-        margin=dict(l=0, r=0, b=0, t=40)
+            zaxis_title='Z',
+            xaxis=dict(
+                range=[-3, 3],
+                tickmode='linear',
+                dtick=1
+            ),
+            yaxis=dict(
+                range=[-3, 3],
+                tickmode='linear',
+                dtick=1
+            ),
+            zaxis=dict(
+                range=[-3, 3],
+                tickmode='linear',
+                dtick=1
+            ),
+            # ⬇️ 關鍵：手動設定每軸空間比例
+            aspectmode='manual',
+            aspectratio=dict(x=1, y=1, z=1)
+            ),
+            margin=dict(l=0, r=0, b=0, t=40)
     )
 
-    pio.write_html(fig, file=output_html, auto_open=True)
+    pio.write_html(fig, file=output_html, auto_open=False)
     print(f"✅ 已輸出至：{output_html}")
