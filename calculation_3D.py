@@ -3,6 +3,11 @@ import numpy as np
 import os
 from tqdm import tqdm
 
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+
 def read_calibration_file(path):
     data = {}
     with open(path, 'r') as f:
@@ -43,106 +48,42 @@ def get_valid_LR_ball_centers(LR_map, all_2D_centers):
 
     return left_pts, right_pts
 
-# def get_LR_centers_with_marks(LR_map, all_2D_centers):
-#     """
-#     根據 all_2D_centers 建立包含球與標記資訊的結構，
-#     並分別輸出對應的座標 list 長度一致。
-#     valid_LR_centers = [
-#                            {
-#                                "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_x": (L_mark_x_center_x, L_mark_x_center_y)}, 
-#                                "R": {"ball": (R_ball_center_x, R_ball_center_y)}
-#                            }, 
+def extract_centers(all_2D_centers, total_frames):
+    import re
 
-#                            {
-#                                "L": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (L_mark_o_center_x, L_mark_o_center_y)}, 
-#                                "R": {"ball": (L_ball_center_x, L_ball_center_y), "mark_o": (R_mark_o_center_x, R_mark_o_center_y)}
-#                            }, 
+    # 初始化所有 frame 的值為 None
+    lb = [None] * total_frames
+    rb = [None] * total_frames
+    lmo = [None] * total_frames
+    rmo = [None] * total_frames
+    lmx = [None] * total_frames
+    rmx = [None] * total_frames
 
-#                            {
-#                                "L": {"ball": (L_ball_center_x, L_ball_center_y)}, 
-#                                "R": {"ball": (R_ball_center_x, R_ball_center_y)}
-#                            }, 
+    # 正則表達式抓 frame index 和左右
+    pattern = re.compile(r"image-(\d{4})_([LR])\.txt")
 
-#                            ...
-#                        ]
-#     """
-#     # 檢查每個 L-R 配對是否都有球，並加入 mark 資訊
-#     valid_LR_centers = []
+    for fname, center_dict in all_2D_centers.items():
+        m = pattern.match(fname)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        side = m.group(2)
 
-#     for base in sorted(LR_map.keys()):
-#         pair = LR_map[base]
-#         L_file, R_file = pair["L"], pair["R"]
+        if idx >= total_frames:
+            continue  # 忽略超出範圍的 frame
 
-#         if L_file and R_file:
-#             if 0 in all_2D_centers[L_file] and 0 in all_2D_centers[R_file]:
-#                 entry = {"L": {}, "R": {}}
+        if side == "L":
+            lb[idx] = center_dict.get(0)
+            lmo[idx] = center_dict.get(1)
+            lmx[idx] = center_dict.get(2)
+        elif side == "R":
+            rb[idx] = center_dict.get(0)
+            rmo[idx] = center_dict.get(1)
+            rmx[idx] = center_dict.get(2)
 
-#                 # Ball center
-#                 entry["L"]["ball"] = all_2D_centers[L_file][0]
-#                 entry["R"]["ball"] = all_2D_centers[R_file][0]
+    return lb, rb, lmo, rmo, lmx, rmx
 
-#                 # Optional mark_o (key = 1)
-#                 entry["L"]["mark_o"] = all_2D_centers[L_file].get(1, None)
-#                 entry["R"]["mark_o"] = all_2D_centers[R_file].get(1, None)
-
-#                 # Optional mark_x (key = 2)
-#                 entry["L"]["mark_x"] = all_2D_centers[L_file].get(2, None)
-#                 entry["R"]["mark_x"] = all_2D_centers[R_file].get(2, None)
-
-#                 valid_LR_centers.append(entry)
-
-#     # 分別組出六個 list
-#     left_balls     = [item["L"]["ball"] for item in valid_LR_centers]
-#     right_balls    = [item["R"]["ball"] for item in valid_LR_centers]
-#     left_mark_o    = [item["L"].get("mark_o", None) for item in valid_LR_centers]
-#     right_mark_o   = [item["R"].get("mark_o", None) for item in valid_LR_centers]
-#     left_mark_x    = [item["L"].get("mark_x", None) for item in valid_LR_centers]
-#     right_mark_x   = [item["R"].get("mark_x", None) for item in valid_LR_centers]
-
-#     return left_balls, right_balls, left_mark_o, right_mark_o, left_mark_x, right_mark_x
-
-def extract_centers(all_2D_centers):
-        import re
-
-        # 解析所有的 frame index
-        frame_idxs = set()
-        pattern = re.compile(r"image-(\d{4})_[LR]\.txt")
-        for fname in all_2D_centers:
-            m = pattern.match(fname)
-            if m:
-                frame_idxs.add(int(m.group(1)))
-        if not frame_idxs:
-            return {}, {}, {}, {}, {}, {}
-
-        min_idx, max_idx = min(frame_idxs), max(frame_idxs)
-
-        # 準備輸出列表
-        lb, rb = [], []
-        lmo, rmo = [], []
-        lmx, rmx = [], []
-
-        # 依序從最小到最大影格號提取
-        for idx in range(min_idx, max_idx + 1):
-            # 組出左右檔名
-            fname_L = f"image-{idx:04d}_L.txt"
-            fname_R = f"image-{idx:04d}_R.txt"
-
-            # 取出對應的 dict（若不存在，當作空 dict 處理）
-            cent_L = all_2D_centers.get(fname_L, {})
-            cent_R = all_2D_centers.get(fname_R, {})
-
-            # 提取 ball(id=0)、mark_o(id=1)、mark_x(id=2)
-            lb.append( cent_L.get(0) )
-            lmo.append( cent_L.get(1) )
-            lmx.append( cent_L.get(2) )
-
-            rb.append( cent_R.get(0) )
-            rmo.append( cent_R.get(1) )
-            rmx.append( cent_R.get(2) )
-
-        return lb, rb, lmo, rmo, lmx, rmx
-
-def triangulation(left_camera_P, right_camera_P, u, v, up, vp):
+def triangulation(left_camera_P, right_camera_P, u, v, up, vp, to_meter=False):
 
     # epipolar_line = np.dot(F, np.array([u, v, 1])) 
 
@@ -157,8 +98,20 @@ def triangulation(left_camera_P, right_camera_P, u, v, up, vp):
     _, _, vt = np.linalg.svd(A)     # Perform SVD
     X = vt[-1]                      # The 3D point is the last column of V (Vt's last row)
     X /= X[3]                       # Normalize the point
-    X /= 1000   # mm 轉為公尺
+    if to_meter:
+        X /= 1000   # mm 轉為公尺
     return X[:3]
+
+# 投影誤差函式
+def reprojection_error(P, K, RT, uv_gt):
+    P_proj = np.dot(K, RT)
+    P = np.array([P[0], P[1], P[2], 1])
+
+    uv_proj = np.dot(P_proj, P)
+    uv_proj /= uv_proj[-1]
+    uv_proj = uv_proj[:2]
+
+    return uv_proj - uv_gt
 
 def myDLT(camParams, left_pts, right_pts):
     left_camera_P = np.dot(camParams['LeftCamK'], camParams['LeftCamRT'])
@@ -169,16 +122,34 @@ def myDLT(camParams, left_pts, right_pts):
     left_pts = [(np.nan, np.nan) if pt is None else pt for pt in left_pts ]
     right_pts = [(np.nan, np.nan) if pt is None else pt for pt in right_pts ]
 
+    reproj_errors_L = []
+    reproj_errors_R = []
+
     for i in tqdm(range(len(left_pts))):
-        if not np.isnan(left_pts[i][0]) and not np.isnan(right_pts[i][0]):
+        if np.isnan(left_pts[i][0]) or np.isnan(right_pts[i][0]):
+            points_3D.append([np.nan, np.nan, np.nan])
+            reproj_errors_L.append(np.nan)
+            reproj_errors_R.append(np.nan)
+        else:
             u, v = left_pts[i]          # set u, v (x, y in the left image)
             up, vp = right_pts[i]       # set up, vp (x, y in the right image)
             X = triangulation(left_camera_P, right_camera_P, u, v, up, vp)
             points_3D.append(X)
-        else:
-            points_3D.append([np.nan, np.nan, np.nan])
 
-    return np.array(points_3D, dtype=np.float32)
+            # print(left_pts[i])
+            # print(right_pts[i])
+
+            error_L = reprojection_error(X, camParams['LeftCamK'], camParams['LeftCamRT'], (u, v))
+            error_R = reprojection_error(X, camParams['RightCamK'], camParams['RightCamRT'], (up, vp))
+
+            reproj_errors_L.append(np.linalg.norm(error_L))
+            reproj_errors_R.append(np.linalg.norm(error_R))
+
+            # print(f"Frame {i+1}")
+            # print("Reprojection Error Left: ", error_L)
+            # print("Reprojection Error Right: ", error_R)
+
+    return np.array(points_3D, dtype=np.float32), reproj_errors_L, reproj_errors_R
 
 def transform_coord_system(points_3D, basis_points, origin_indices=(0, 3)):
     i, j = origin_indices
@@ -210,128 +181,100 @@ def transform_coord_system(points_3D, basis_points, origin_indices=(0, 3)):
 
     return transformed, R
 
-def compute_marker_3d(
-        mark_type='mark_o',
-        K_left=None, RT_left=None, uv_left=None,
-        K_right=None, RT_right=None, uv_right=None,
-        C_ball=None, r=0.02
-    ):
-    """
-    支援兩種標記類型：'mark_o'（主標記）與 'mark_x'（球背面）
-    若為 'mark_x'，則自動轉換為球體正對面的 'mark_o' 位置（即從球心對稱）
 
-    回傳：
-    - P_mark: 3D 座標
-    - reproj_error_left/right: 投影誤差
+def mark_x_to_mark_o(P_mark, C_ball):
+    # 如果是 mark_x，轉換到球的另一面對稱位置
+    direction = P_mark - C_ball
+    P_mark = C_ball - direction  # 對稱於球心
+    return P_mark
+
+
+def estimate_marker_3d_on_sphere(K_L, K_R, RT_L, RT_R, uv_L, uv_R, center, radius):
+    """
+    根據左右相機的 K、RT、2D 座標與球心、半徑，估算標記的 3D 座標
     """
 
-    def get_ray(K, RT, uv):
-        uv_h = np.array([uv[0], uv[1], 1.0])
-        d_cam = np.linalg.inv(K) @ uv_h
-        d_cam /= np.linalg.norm(d_cam)
+    def get_camera_center_and_rotation(RT):
         R = RT[:3, :3]
         t = RT[:3, 3]
-        d_world = R @ d_cam
+        C = -R.T @ t
+        return C, R
+
+    def pixel_to_ray(K, uv, R, C):
+        uv_h = np.array([uv[0], uv[1], 1.0])
+        d_cam = np.linalg.inv(K) @ uv_h
+        d_world = R.T @ d_cam
         d_world /= np.linalg.norm(d_world)
-        O_cam = -R.T @ t
-        return O_cam, d_world, R, t
+        return C, d_world
 
-    # 選擇一個視角作為主視角（預設左）
-    if uv_left is not None and K_left is not None and RT_left is not None:
-        O_cam, d_world, R_used, t_used = get_ray(K_left, RT_left, uv_left)
-    elif uv_right is not None and K_right is not None and RT_right is not None:
-        O_cam, d_world, R_used, t_used = get_ray(K_right, RT_right, uv_right)
-    else:
-        raise ValueError("請至少提供一組完整的相機內參、外參與影像座標")
+    def intersect_ray_sphere(C, d, center, radius):
+        oc = C - center
+        a = np.dot(d, d)
+        b = 2.0 * np.dot(oc, d)
+        c = np.dot(oc, oc) - radius**2
+        discriminant = b**2 - 4*a*c
+        if discriminant < 0:
+            return None
+        sqrt_disc = np.sqrt(discriminant)
+        t1 = (-b - sqrt_disc) / (2*a)
+        t2 = (-b + sqrt_disc) / (2*a)
+        p1 = C + t1 * d
+        p2 = C + t2 * d
+        return p1, p2
 
-    # 射線與球體交點計算
-    OC = O_cam - C_ball
-    A = np.dot(d_world, d_world)
-    B = 2 * np.dot(d_world, OC)
-    C = np.dot(OC, OC) - r**2
-    discriminant = B**2 - 4 * A * C
-    if discriminant < 0:
-        return {"P_mark": np.array([np.nan, np.nan, np.nan])}
+    def select_closest(points, center):
+        return min(points, key=lambda p: np.linalg.norm(p - center))
 
-    t1 = (-B - np.sqrt(discriminant)) / (2 * A)
-    t2 = (-B + np.sqrt(discriminant)) / (2 * A)
-    P1 = O_cam + t1 * d_world
-    P2 = O_cam + t2 * d_world
+    # 左右相機資訊
+    C_L, R_L = get_camera_center_and_rotation(RT_L)
+    C_R, R_R = get_camera_center_and_rotation(RT_R)
 
-    # 法向量檢查，選擇面向相機的那一點
-    n1 = (P1 - C_ball) / np.linalg.norm(P1 - C_ball)
-    n2 = (P2 - C_ball) / np.linalg.norm(P2 - C_ball)
-    dot1 = np.dot(n1, -d_world)
-    dot2 = np.dot(n2, -d_world)
-    P_mark = P1 if dot1 > dot2 else P2
+    # 左右相機視線
+    origin_L, dir_L = pixel_to_ray(K_L, uv_L, R_L, C_L)
+    origin_R, dir_R = pixel_to_ray(K_R, uv_R, R_R, C_R)
 
-    # 如果是 mark_x，轉換到球的另一面對稱位置
-    if mark_type == 'mark_x':
-        direction = P_mark - C_ball
-        P_mark = C_ball - direction  # 對稱於球心
+    # 與球面交點
+    P_L = intersect_ray_sphere(origin_L, dir_L, center, radius)
+    P_R = intersect_ray_sphere(origin_R, dir_R, center, radius)
+    if P_L is None or P_R is None:
+        return np.array([np.nan, np.nan, np.nan])
 
-    result = {"P_mark": P_mark}
+    P_L_sel = select_closest(P_L, center)
+    P_R_sel = select_closest(P_R, center)
 
-    # 投影誤差函式
-    def reprojection_error(P, K, RT, uv_gt):
-        R = RT[:3, :3]
-        t = RT[:3, 3].reshape(3, 1)
-        P_cam = R @ P.reshape(3, 1) + t
-        P_proj = K @ P_cam
-        P_proj /= P_proj[2]
-        uv_proj = P_proj[:2].flatten()
-        return np.linalg.norm(uv_proj - np.array(uv_gt))
+    P_est_raw = (P_L_sel + P_R_sel) / 2  # 線性平均
+    P_est = center + radius * (P_est_raw - center) / np.linalg.norm(P_est_raw - center)  # 強制貼合球面
 
-    # 計算左、右影像的投影誤差
-    if uv_left is not None and K_left is not None and RT_left is not None:
-        result["reproj_error_left"] = reprojection_error(P_mark, K_left, RT_left, uv_left)
-    if uv_right is not None and K_right is not None and RT_right is not None:
-        result["reproj_error_right"] = reprojection_error(P_mark, K_right, RT_right, uv_right)
+    return P_est
 
-    return result
 
 def get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx):
-    left_camera_P = np.dot(camParams['LeftCamK'], camParams['LeftCamRT'])
-    right_camera_P = np.dot(camParams['RightCamK'], camParams['RightCamRT'])
+
+    K_L, K_R = camParams['LeftCamK'], camParams['RightCamK']
+    RT_L, RT_R = camParams['LeftCamRT'], camParams['RightCamRT']
+
     marks_3D = []
     for i in range(len(traj_3D)):
+
         C_ball = traj_3D[i]
-        if lmo[i] == rmo[i] == lmx[i] == rmx[i] == None:            # 左右都沒偵測到標記
-            marks_3D.append(np.array([np.nan, np.nan, np.nan]))
-            continue
-        
-        # # 如果兩邊都偵測到標記 直接DLT
-        # if lmo[i] and rmo[i]:
-        #     u, v = lmo[i]
-        #     up, vp = rmo[i]
-        #     P_mark = triangulation(left_camera_P, right_camera_P, u, v, up, vp)
-        #     marks_3D.append(P_mark)
-        #     continue
-        # elif lmx[i] and rmx[i]:
-        #     u, v = lmx[i]
-        #     up, vp = rmx[i]
-        #     P_mark = triangulation(left_camera_P, right_camera_P, u, v, up, vp)
-        #     direction = P_mark - C_ball
-        #     P_mark = C_ball - direction  # 對稱於球心
-        #     marks_3D.append(P_mark)
-        #     continue
         
         # 如果只有其中一邊偵測到標記 用球面方程式計算
-        uv_left, uv_right = lmo[i], rmo[i]
-        if uv_left or uv_right:
+        if lmo[i] and rmo[i]:
+            uv_L, uv_R = lmo[i], rmo[i]
             mark_type = 'mark_o'
-        else:
-            uv_left, uv_right = lmx[i], rmx[i]
+        elif lmx[i] and rmx[i]:
+            uv_L, uv_R = lmx[i], rmx[i]
             mark_type = 'mark_x'
+        else:
+            marks_3D.append(np.array([np.nan, np.nan, np.nan]))
+            continue
 
-        result = compute_marker_3d(
-            mark_type=mark_type,
-            K_left=camParams['LeftCamK'], RT_left=camParams['LeftCamRT'], uv_left=uv_left,
-            K_right=camParams['RightCamK'], RT_right=camParams['RightCamRT'], uv_right=uv_right,
-            C_ball=C_ball, r=0.02
-        )
+        P_mark = estimate_marker_3d_on_sphere(K_L, K_R, RT_L, RT_R, uv_L, uv_R, C_ball, radius=20)
 
-        marks_3D.append(result["P_mark"])
+        if mark_type == 'mark_x':
+            P_mark = mark_x_to_mark_o(P_mark, C_ball)
+
+        marks_3D.append(P_mark)
     
     return np.array(marks_3D)
 

@@ -22,10 +22,10 @@ EXTRACT_2D_POINTS = True
 PICK_CORNERS = False
 GEN_VERIFY_VIDEO = False
 CALCULATE_3D = True
-CALCULATE_SPIN_RATE = False
+CALCULATE_SPIN_RATE = True
 
-all_sample_folder_name = '0415'
-sample_folder_name = '20250415_193043'
+all_sample_folder_name = '0412'
+sample_folder_name = '20250412_152611'
 
 ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
@@ -141,104 +141,185 @@ if __name__ == '__main__':
                         "image-0002_R.txt": {0: (ball_center_x, ball_center_y)}, 
                         ...
                      }
-
-    LR_map = {
-                "image-0000": {"L": "image-0000_L.txt", "R": _______None_______},
-                "image-0001": {"L": _______None_______, "R": "image-0001_R.txt"},
-                "image-0002": {"L": "image-0002_L.txt", "R": "image-0002_R.txt"}
-                ...
-             }
     """
     
     if CALCULATE_3D:
         camParams = read_calibration_file(camParamsPath)
-        # LR_map = create_LR_map(all_2D_centers)
-        # lb, rb, lmo, rmo, lmx, rmx = get_LR_centers_with_marks(LR_map, all_2D_centers)
-
-        lb, rb, lmo, rmo, lmx, rmx = extract_centers(all_2D_centers)
+        lb, rb, lmo, rmo, lmx, rmx = extract_centers(all_2D_centers, total_frames=500)
 
         print('🚀 計算3D座標中...')
         left_corners = np.loadtxt(f'{output_folder_path}/left_corners.txt')
         right_corners = np.loadtxt(f'{output_folder_path}/right_corners.txt')
         
-        corners_3D = myDLT(camParams, left_corners, right_corners)
-        traj_3D = myDLT(camParams, lb, rb)
+        corners_3D, _, _ = myDLT(camParams, left_corners, right_corners)
+        traj_3D, traj_reproj_error_L, traj_reproj_error_R = myDLT(camParams, lb, rb)
+        # marks_o_3D, mo_reproj_error_L, mo_reproj_error_R = myDLT(camParams, lmo, rmo)
+        # marks_x_3D, mx_reproj_error_L, mx_reproj_error_R = myDLT(camParams, lmx, rmx)
 
-        # # 軌跡也需記錄掉幀情況
-        # print(traj_3D)
-        # input()
+        # for i in range(len(traj_3D)):
+        #     if traj_3D[i][0] != np.nan and lmo[i] != None and rmo[i] != None:
+        #         print(traj_3D[i])
+        #         print(lmo[i])
+        #         print(rmo[i])
+        #         input()
 
+        # # 輸出 reprojection error 圖表
+        # reproj_fig = plot_reprojection_error(
+        #     traj_reproj_error_L, traj_reproj_error_R,
+        #     mo_reproj_error_L, mo_reproj_error_R,
+        #     mx_reproj_error_L, mx_reproj_error_R
+        # )
+        # reproj_fig.savefig(f'{output_sample_folder_path}/reprojection_errors.jpg')
+        # print(f"✅ 已輸出至：{output_sample_folder_path}/reprojection_errors.jpg")
 
-
-
-        # traj_3D_filtered, _ = remove_outliers_by_dbscan(traj_3D, eps=10, min_samples=5)
-        # traj_3D_filtered, _ = remove_outliers_by_speed(traj_3D_filtered, max_speed_threshold=30)
+        # # 將 mark_x 座標轉為 mark_o 儲存為 marks_3D
+        # marks_3D = marks_o_3D
+        # for i in range(len(marks_o_3D)):
+        #     P_mark, C_ball = marks_x_3D[i], traj_3D[i]
+        #     if P_mark[0] != np.nan:
+        #         mark_o_3D = mark_x_to_mark_o(P_mark, C_ball)
+        #         marks_3D[i] = mark_o_3D
 
         marks_3D = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx)    # 根據球心座標和球面方程式計算標記3D座標
+        print(len(marks_3D))
 
         # 轉換為自訂的坐標系
         corners_3D_transformed, _ = transform_coord_system(corners_3D, corners_3D)
         traj_3D_transformed, _ = transform_coord_system(traj_3D, corners_3D)
-        marks_3D_transformed, _ = transform_coord_system(marks_3D, corners_3D)
+        marks_3D_transformed = shift_marks_by_trajectory(traj_3D, traj_3D_transformed, marks_3D)
+        # marks_3D_transformed, _ = transform_coord_system(marks_3D, corners_3D)
 
-        # 套用Kalman Filter做平滑
-        traj_3D_transformed_KF = simple_kalman_filter_3d(traj_3D_transformed, FPS)
-
-        # 標記座標跟著平滑後的軌跡一起平移
-        diffs = traj_3D_transformed_KF - traj_3D_transformed
-        marks_3D_transformed = marks_3D_transformed + diffs
-
-        np.savetxt(f'{output_folder_path}/corners_3D.txt', corners_3D_transformed)
-        np.savetxt(f'{output_sample_folder_path}/traj_3D_transformed.txt', traj_3D_transformed_KF)
+        np.savetxt(f'{output_folder_path}/corners_3D_transformed.txt', corners_3D_transformed)
+        np.savetxt(f'{output_sample_folder_path}/traj_3D_transformed.txt', traj_3D_transformed)
         np.savetxt(f'{output_sample_folder_path}/marks_3D_transformed.txt', marks_3D_transformed)
 
-        collisions = detect_table_tennis_collisions(traj_3D_transformed_KF, corners_3D_transformed)
-        traj_3D_segs = split_trajectory_by_collisions(traj_3D_transformed, collisions)
+        traj_list = [traj_3D_transformed]
+        mark_list = [marks_3D_transformed]
+        plot_multiple_3d_trajectories_with_plane(traj_list, mark_list, corners_3D_transformed, None, output_html=f'{output_sample_folder_path}/traj_ori.html')
+
+        # 找出包含軌跡的 frame 和 start_idx, end_idx 從頭尾檢查非空值
+        traj_3D_transformed, start_idx, end_idx = extract_valid_trajectory(traj_3D_transformed)
+        marks_3D_transformed = marks_3D_transformed[start_idx:end_idx+1]
+
+        # 移除軌跡異常點 平滑軌跡 標記點隨平滑後的軌跡平移
+        cleaned_traj = remove_velocity_outliers(traj_3D_transformed)    # Step 1: 移除異常速度點
+
+        # 偵測碰撞點 並根據碰撞點切分軌跡和標記
+        temp_smoothed_traj = kalman_smooth_with_interp(cleaned_traj, smooth_strength=1.0, extend_points=10)     # 暫時平滑軌跡 有助找出碰傳idx
+        collisions = detect_table_tennis_collisions_sequential(temp_smoothed_traj, corners_3D_transformed, z_tolerance=500)
+        traj_3D_segs = split_trajectory_by_collisions(cleaned_traj, collisions)
         marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
 
+        # 切分後每段軌跡分開平滑
         for i in range(len(traj_3D_segs)):
-            traj_list = [traj_3D_segs[i], marks_3D_segs[i]]
-            # traj_list = [traj_3D_segs[i], simple_kalman_filter_3d(traj_3D_segs[i], FPS), marks_3D_segs[i]]
-            plot_multiple_3d_trajectories_with_plane(traj_list, corners_3D_transformed, f'{output_sample_folder_path}/traj{i+1}.html')
+            smoothed_traj = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=1.0, extend_points=10)
+            marks_3D_segs[i] = shift_marks_by_trajectory(traj_3D_segs[i], smoothed_traj, marks_3D_segs[i])
+            traj_3D_segs[i] = smoothed_traj
+            np.savetxt(f'{output_sample_folder_path}/smoothed_traj{i+1}.txt', traj_3D_segs[i])
+
+        # # 輸出每段軌跡和標記(以不同顏色區分)
+        # plot_multiple_3d_trajectories_with_plane(traj_3D_segs, marks_3D_segs, corners_3D_transformed, None, output_html=f'{output_sample_folder_path}/traj_segs.html')
 
     # ----------------------------------------------------------------
     # Step 8: # 計算旋轉速度
     # ----------------------------------------------------------------
+    # 用空氣動力學計算轉速
+    aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
+    
+    px_list, py_list, pz_list, time_segments, rps_list = [], [], [], [], []
+    dt = 1 / FPS  # 每一幀的時間間隔 (秒)
+
+    for i in range(len(traj_3D_segs)):
+        traj = traj_3D_segs[i]
+        t, px, py, pz = fit_parabolic_trajectory(traj, dt)      # 擬和拋物線
+        px_list.append(px)
+        py_list.append(py)
+        pz_list.append(pz)
+        
+        time_segments.append(t + (time_segments[-1][-1] + dt if time_segments else 0))
+
+        rps = compute_angular_velocity_rps(t, px, py, pz, aero_params)      # 帶入拋物線計算轉速
+        rps_list.append(rps)
+
+    plot_trajectories_with_spin_axes_plotly(px_list, py_list, pz_list, 
+                                            traj_3D_segs, aero_params, dt, 
+                                            path=f"{output_sample_folder_path}/polynomial_curves.html")
+    
+    plot_angular_velocity_curves(time_segments, rps_list, 
+                                 path=f"{output_sample_folder_path}/rps_aero.jpg")
+
+
     if CALCULATE_SPIN_RATE:
-
-        # traj_3D = np.loadtxt(f"{output_sample_folder_path}/traj_3D_transformed.txt")
-        # marks_3D = np.loadtxt(f"{output_sample_folder_path}/marks_3D_transformed.txt")
-
-        collisions = detect_table_tennis_collisions(traj_3D_transformed_KF, corners_3D_transformed)
-        traj_3D_segs = split_trajectory_by_collisions(traj_3D_transformed, collisions)
-        marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
-
+        
+        # 每段軌跡逐一計算轉速
         all_spin_axis = []
+
         for i in range(len(traj_3D_segs)):
-            offsets = calc_offsets(traj_3D_segs[i], marks_3D_segs[i])
-            fig, spin_axis = fit_and_plot_offset_plane(offsets)
+
+            # 計算標記相對球心的位置
+            offsets = marks_3D_segs[i] - traj_3D_segs[i]
+            # offsets = offsets[~np.isnan(offsets).any(axis=1)]
+
+            fig, spin_axis, filtered_offsets = fit_and_plot_offset_plane(offsets)     # 擬和旋轉軸
             all_spin_axis.append(spin_axis)
 
+            # print(len(marks_3D_segs[i][~np.isnan(marks_3D_segs[i]).any(axis=1)]))
+
+            # 刪除和旋轉軸偏差過大的標記點
+            for j in range(len(filtered_offsets)):
+                if np.isnan(filtered_offsets[j][0]):
+                    marks_3D_segs[i][j] = np.array([np.nan, np.nan, np.nan])
+
+            # 輸出旋轉軸圖
             spin_axis_graph_path = f"{output_sample_folder_path}/spin_axis_seg{i+1}.html"
             pio.write_html(fig, file=spin_axis_graph_path, auto_open=False)
             print(f"✅ 已輸出至：{spin_axis_graph_path}")
 
-            rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list = calc_candidate_spin_rates(FPS, 
-                                                                                                         traj_3D_segs[i], 
-                                                                                                         marks_3D_segs[i], 
-                                                                                                         spin_axis)
-            print(rps_cw_list)
-            rps_cw = trimmed_mean_rps(rps_cw_list, trim_frac=0.1)
-            print(rps_cw)
+        plot_multiple_3d_trajectories_with_plane(traj_3D_segs, marks_3D_segs, corners_3D_transformed, 
+                                                 all_spin_axis, output_html=f'{output_sample_folder_path}/traj_segs.html')
 
-            print(rps_cw_extra_list)
-            rps_cw_extra = trimmed_mean_rps(rps_cw_extra_list, trim_frac=0.1)
-            print(rps_cw_extra)
+# # ------------------------------------------------------------------------------------------------------------------------------
 
-            print(rps_ccw_list)
-            rps_ccw = trimmed_mean_rps(rps_ccw_list, trim_frac=0.1)
-            print(rps_ccw)
+#             # 如果沒有足夠的標記座標(至少三個)可以擬和平面 跳過後續轉速計算
+#             if spin_axis[0] == np.nan:
+#                 continue
+            
+#             candidate_rps_lists = calc_candidate_spin_rates(traj_3D_segs[i], marks_3D_segs[i], spin_axis, fps=225)
+#             rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list = candidate_rps_lists
 
-            print(rps_ccw_extra_list)
-            rps_ccw_extra = trimmed_mean_rps(rps_ccw_extra_list, trim_frac=0.1)
-            print(rps_ccw_extra)
+#             print(rps_cw_list)
+#             print(rps_cw_extra_list)
+#             print(rps_ccw_list)
+#             print(rps_ccw_extra_list)
+
+#             rps_cw = np.mean(rps_cw_list)
+#             rps_cw_extra = np.mean(rps_cw_extra_list)
+#             rps_ccw = np.mean(rps_ccw_list)
+#             rps_ccw_extra = np.mean(rps_ccw_extra_list)
+
+#             # 空氣動力學參數: [重力加速度 (m/s^2), 桌球質量 (kg), 空氣密度 (kg/m^3), 球的迎風面積 (m^2), 球半徑 (m), 阻力係數, 馬格努斯力係數]
+#             aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
+
+#             traj_3D = traj_3D_segs[i] / 1000    # 轉為公尺
+
+#             # 計算每一幀的速度 (Ground Truth)
+#             dt = 1 / FPS                                            # 每一幀的時間間隔 (秒)
+#             velocity_gt = np.diff(traj_3D, axis=0) * FPS            # 速度計算
+#             acceleration_gt = np.diff(velocity_gt, axis=0) * FPS    # 加速度計算
+
+#             # 設定模擬步數
+#             num_steps = len(traj_3D)
+
+#             # 計算四種旋轉速度回推的軌跡
+#             candidate_trajectories = []
+#             for rps_list in candidate_rps_lists:
+#                 rps = np.mean(rps_list)
+#                 traj = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps, dt, num_steps, spin_axis, aero_params)
+#                 candidate_trajectories.append(traj)
+
+#             trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra = candidate_trajectories
+#             draw_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, 
+#                               f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html")
+
+#             print("Corrected Rotation Axis (Plane Normal):", spin_axis)
+#             print(rps_cw, rps_cw_extra, rps_ccw, rps_ccw_extra)

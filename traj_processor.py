@@ -7,6 +7,9 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.decomposition import PCA
 from sklearn.ensemble import IsolationForest
 from sklearn.cluster import DBSCAN
+from scipy.interpolate import interp1d
+from pykalman import KalmanFilter
+from numpy.polynomial.polynomial import Polynomial
 
 # 簡易 Kalman filter：使用 constant velocity model 進行平滑
 def simple_kalman_filter_3d(trajectory, FPS, R=25.0, Q=1.0):
@@ -178,6 +181,54 @@ def detect_table_tennis_collisions(traj, table_corners, z_tolerance=0.05):
     results = [(idx, traj[idx]) for idx in collision_indices if idx is not None]
     return results
 
+def detect_table_tennis_collisions_sequential(traj, table_corners, z_tolerance=0.05):
+    """
+    更嚴謹的三次碰撞點偵測：根據 Z 軌跡的先下降再上升的轉折點為主
+    條件：
+        - 撞擊點需在球桌範圍內
+        - Z 軸需接近桌面高度
+        - 依照順序，符合反彈形狀的點才能視為合法碰撞點
+        - Y 軸範圍劃分前後場與拍擊段落
+    :param traj: (N, 3) 的軌跡資料 (X, Y, Z)
+    :param table_corners: (4, 3) 的球桌四角座標
+    :param z_tolerance: 與桌面高度的容許誤差
+    :return: [(idx1, point1), (idx2, point2), (idx3, point3)] (最多三項)
+    """
+    traj = np.array(traj)
+    z = traj[:, 2]
+    y = traj[:, 1]
+
+    table_corners = np.array(table_corners)
+    x_min, x_max = table_corners[:, 0].min(), table_corners[:, 0].max()
+    y_min, y_max = table_corners[:, 1].min(), table_corners[:, 1].max()
+    z_table = table_corners[:, 2].mean()
+    net_y = (y_min + y_max) / 2
+
+    def is_near_table(pos):
+        x, y_, z_ = pos
+        return (x_min <= x <= x_max) and (y_min <= y_ <= y_max) and (abs(z_ - z_table) < z_tolerance)
+
+    collisions = []
+    stage = 0  # 0: first bounce, 1: strike, 2: return bounce
+
+    for i in range(1, len(traj) - 1):
+        prev_z, this_z, next_z = z[i - 1], z[i], z[i + 1]
+        this_y = y[i]
+        if this_z < prev_z and this_z < next_z and is_near_table(traj[i]):
+            if stage == 0 and this_y > net_y:
+                collisions.append((i, traj[i]))
+                stage = 1
+            elif stage == 2 and this_y < net_y:
+                collisions.append((i, traj[i]))
+                stage = 3  # finish
+        elif stage == 1:
+            # find peak Y (hit)
+            if this_y > y[i - 1] and this_y > y[i + 1]:
+                collisions.append((i, traj[i]))
+                stage = 2
+
+    return collisions
+
 def split_trajectory_by_collisions(traj, collisions):
     """
     根據碰撞點 index 分割軌跡段落，最多切成四段
@@ -199,6 +250,142 @@ def split_trajectory_by_collisions(traj, collisions):
         segments.append(traj[start_idx:])  # 剩下的當作最後一段
 
     return segments
+
+def remove_velocity_outliers(traj_3D, threshold_std=3):
+    traj_3D = np.array(traj_3D, dtype=np.float64)
+    mask = ~np.isnan(traj_3D).any(axis=1)
+
+    velocities = np.linalg.norm(np.diff(traj_3D, axis=0), axis=1)
+    median_v = np.median(velocities[~np.isnan(velocities)])
+    std_v = np.std(velocities[~np.isnan(velocities)])
+
+    outlier_mask = np.zeros(len(traj_3D), dtype=bool)
+    for i in range(1, len(traj_3D)):
+        if mask[i] and mask[i-1]:
+            v = np.linalg.norm(traj_3D[i] - traj_3D[i-1])
+            if v > median_v + threshold_std * std_v:
+                outlier_mask[i] = True
+
+    cleaned_traj = traj_3D.copy()
+    cleaned_traj[outlier_mask] = np.nan
+    return cleaned_traj
+
+def interpolate_and_moving_average(traj_3D, window=5):
+    traj_3D = np.array(traj_3D, dtype=np.float64)
+    N = len(traj_3D)
+
+    # 線性內插補齊 NaN
+    valid_mask = ~np.isnan(traj_3D).any(axis=1)
+    valid_indices = np.where(valid_mask)[0]
+    full_indices = np.arange(N)
+
+    interp_traj = np.empty_like(traj_3D)
+    for i in range(3):
+        f = interp1d(valid_indices, traj_3D[valid_mask, i], kind='linear', fill_value="extrapolate")
+        interp_traj[:, i] = f(full_indices)
+
+    # 移動平均
+    smoothed_traj = np.copy(interp_traj)
+    for i in range(3):
+        for j in range(N):
+            left = max(0, j - window // 2)
+            right = min(N, j + window // 2 + 1)
+            smoothed_traj[j, i] = np.mean(interp_traj[left:right, i])
+    
+    return smoothed_traj
+
+import numpy as np
+from pykalman import KalmanFilter
+
+def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
+    """
+    對3D軌跡進行線性內插與卡爾曼平滑，並在首尾延伸虛擬點減少邊界效應。
+
+    Parameters:
+    - traj_3D: shape (N, 3) 的陣列，可能含有 NaN。
+    - smooth_strength: 平滑強度，越大代表越平滑。
+    - extend_points: 首尾要延伸的虛擬點數量。
+
+    Returns:
+    - smoothed_traj: 經平滑後的3D軌跡，長度與原始輸入相同。
+    """
+    traj_3D = np.array(traj_3D, dtype=np.float64)
+    mask = ~np.isnan(traj_3D).any(axis=1)
+    
+    full_indices = np.arange(len(traj_3D))
+    interp_traj = np.empty_like(traj_3D)
+
+    for i in range(3):
+        valid_idx = full_indices[mask]
+        valid_vals = traj_3D[mask, i]
+        interp_traj[:, i] = np.interp(full_indices, valid_idx, valid_vals)
+
+    # 延伸首尾
+    head_dir = interp_traj[1] - interp_traj[0]
+    tail_dir = interp_traj[-1] - interp_traj[-2]
+    head_extend = [interp_traj[0] - head_dir * (i+1) for i in range(extend_points)][::-1]
+    tail_extend = [interp_traj[-1] + tail_dir * (i+1) for i in range(extend_points)]
+
+    extended_traj = np.vstack([head_extend, interp_traj, tail_extend])
+
+    # 調整平滑程度
+    transition_cov = np.diag([1e-4 * smooth_strength]*3 + [1e-6 * smooth_strength]*3)
+    observation_cov = np.eye(3) * 1e-2 / smooth_strength
+
+    kf = KalmanFilter(
+        transition_matrices=np.eye(6),
+        observation_matrices=np.hstack([np.eye(3), np.zeros((3, 3))]),
+        transition_covariance=transition_cov,
+        observation_covariance=observation_cov,
+        initial_state_mean=np.hstack([extended_traj[0], [0, 0, 0]]),
+        initial_state_covariance=np.eye(6) * 1e-1
+    )
+
+    smoothed_state_means, _ = kf.smooth(extended_traj)
+    smoothed_traj = smoothed_state_means[:, :3]
+
+    # 裁切掉首尾延伸的部分
+    smoothed_traj = smoothed_traj[extend_points:-extend_points]
+
+    return smoothed_traj
+
+
+def shift_marks_by_trajectory(original_traj, smoothed_traj, marks_3D):
+    delta = smoothed_traj - original_traj
+    shifted_marks = marks_3D.copy()
+    mask = ~np.isnan(marks_3D).any(axis=1)
+    shifted_marks[mask] += delta[mask]
+    return shifted_marks
+
+def extract_valid_trajectory(traj_3D):
+    """
+    從頭尾刪除全是nan的列，只保留有效的[x,y,z]軌跡部分
+    :param traj_np: numpy array of shape (N, 3)
+    :return: numpy array without leading/trailing nan rows
+    """
+    if traj_3D.size == 0:
+        return traj_3D
+
+    # 判斷每一列是不是全部都是nan
+    valid = ~np.isnan(traj_3D).all(axis=1)
+
+    # 找到第一個True和最後一個True
+    valid_indices = np.where(valid)[0]
+    if valid_indices.size == 0:
+        return np.empty((0, 3))  # 全部都是nan的情況
+
+    start_idx = valid_indices[0]
+    end_idx = valid_indices[-1]
+
+    return traj_3D[start_idx:end_idx+1], start_idx, end_idx
+
+def fit_parabolic_trajectory(traj, dt, degree=2):
+    t = np.arange(len(traj)) * dt
+    traj_m = traj / 1000.0  # mm to m
+    px = Polynomial.fit(t, traj_m[:, 0], deg=degree).convert()
+    py = Polynomial.fit(t, traj_m[:, 1], deg=degree).convert()
+    pz = Polynomial.fit(t, traj_m[:, 2], deg=degree).convert()
+    return t, px, py, pz
 
 if __name__ == "__main__":
     pass

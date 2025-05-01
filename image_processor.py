@@ -2,6 +2,7 @@ import cv2
 import os
 import numpy as np
 from tqdm import tqdm
+from calculation_3D import extract_centers
 
 def split_image(image):
 
@@ -11,6 +12,9 @@ def split_image(image):
     right_image = image[:, half_width:]  # 右半部
 
     return left_image, right_image
+
+# def adjust_cropped_ball(image):
+#     return cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 3, 11)
 
 def enhance_image(image, alpha=1.5, beta=30):
 
@@ -78,6 +82,8 @@ def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path
     video_height = display_height  # 540
     small_img_size = (frame_width // 10, frame_width // 10)  # 144x144
     ignore_rate = 0.05
+
+    lb, rb, lmo, rmo, lmx, rmx = extract_centers(all_2D_centers, total_frames=total_frames)
 
     # 初始化 VideoWriter
     video_writer = cv2.VideoWriter(
@@ -185,6 +191,43 @@ def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path
             (0, 255, 255),
             2
         )
+
+        # # 🔁 計算縮放比例
+        # scale_x = display_width / frame_width  # 720 / 1440 = 0.5
+        # scale_y = display_height / frame_height  # 540 / 1080 = 0.5
+
+        # # 🔶 畫上 lb、rb（橘色圓點）
+        # if lb[frame_num] is not None:
+        #     u, v = lb[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     cv2.circle(combined_img, (u, v), 5, (0, 165, 255), -1)  # 橘色
+        # if rb[frame_num] is not None:
+        #     u, v = rb[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     cv2.circle(combined_img, (u + display_width, v), 5, (0, 165, 255), -1)  # 右圖 + offset
+
+        # # ⚪ 畫上 lmo、rmo（白色圓點）
+        # if lmo[frame_num] is not None:
+        #     u, v = lmo[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     cv2.circle(combined_img, (u, v), 5, (255, 255, 255), -1)
+        # if rmo[frame_num] is not None:
+        #     u, v = rmo[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     cv2.circle(combined_img, (u + display_width, v), 5, (255, 255, 255), -1)
+
+        # # ❌ 畫上 lmx、rmx（白色叉叉）
+        # if lmx[frame_num] is not None:
+        #     u, v = lmx[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     cv2.line(combined_img, (u - 5, v - 5), (u + 5, v + 5), (255, 255, 255), 2)
+        #     cv2.line(combined_img, (u - 5, v + 5), (u + 5, v - 5), (255, 255, 255), 2)
+        # if rmx[frame_num] is not None:
+        #     u, v = rmx[frame_num]
+        #     u, v = int(u * scale_x), int(v * scale_y)
+        #     u += display_width
+        #     cv2.line(combined_img, (u - 5, v - 5), (u + 5, v + 5), (255, 255, 255), 2)
+        #     cv2.line(combined_img, (u - 5, v + 5), (u + 5, v - 5), (255, 255, 255), 2)
 
         # 寫入影片
         video_writer.write(combined_img)

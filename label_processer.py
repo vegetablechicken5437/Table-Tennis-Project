@@ -190,10 +190,15 @@ def bbox_loc_constraint(label_data_pixel_coords, image_width=1440, image_height=
 
     # 檢查每個 label 的 pixel polygon 確認是否每個點都在定義的邊界範圍內 若超過邊界 忽略該label
     for label in label_data_pixel_coords:
+        outside = False
         for x, y in label["pixel_polygon"]: 
             if not (x > borders[0] and y > borders[1] and x < borders[2] and y < borders[3]):
-                return []
-        filtered_label_data_pixel_coords.append(label)
+                outside = True
+                break
+        if not outside:
+            filtered_label_data_pixel_coords.append(label)
+        else:
+            outside = False
 
     return filtered_label_data_pixel_coords
 
@@ -212,14 +217,17 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
     filtered_ball_label_files = filter_lr_files(ball_label_files)  # 過濾只保留同時擁有 L 和 R 的檔案
 
     all_bbox_xyxy = {}
-    for label_file_name in tqdm(filtered_ball_label_files):
+    for label_file_name in filtered_ball_label_files:
         label_path = os.path.join(ball_bbox_label_path, label_file_name)    # 讀取影像中的 bbox labels
         ball_label_data = read_bbox_labels(label_path)  
         ball_label_data_pixel_coords = convert_to_pixel_coords(ball_label_data, image_width, image_height)  # 轉換並加入pixel_polygon
-        ball_label_data_pixel_coords = bbox_loc_constraint(ball_label_data_pixel_coords)  # 篩選在定義邊界範圍內的 bbox
+        ball_label_data_pixel_coords = bbox_loc_constraint(ball_label_data_pixel_coords, 
+                                                           image_width, image_height, ignore_rate=0.05)  # 篩選在定義邊界範圍內的 bbox
 
         # 所有 label 的 pixel polygon 都超出定義邊界
         if ball_label_data_pixel_coords == []:
+            print("超出邊界的 frames:")
+            print(label_file_name)
             continue
 
         ball_label_data_best_pixel_coords = select_max_conf_by_class(ball_label_data_pixel_coords)    # 篩選最大 conf 的 label
@@ -236,6 +244,8 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
 
         cropped_ball = image[y1:y2, x1:x2]
         cropped_ball = cv2.resize(cropped_ball, (bbox_width, bbox_height))  # 統一 bbox 尺寸
+
+        # cropped_ball = cv2.fastNlMeansDenoisingColored(cropped_ball, None, 10, 10, 3, 11)
 
         output_path = os.path.join(output_folder, img_file_name)
         cv2.imwrite(output_path, cropped_ball)
@@ -267,16 +277,25 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
     for label_file_name in mark_label_files:
         label_path = os.path.join(mark_poly_label_path, label_file_name)
         mark_label_data = read_poly_labels(label_path)
-        mark_label_data_pixel_coords = convert_to_pixel_coords(mark_label_data, bbox_width, bbox_height)    # 轉換並加入pixel_polygon
-        mark_label_data_pixel_coords_centers = compute_enclosing_circle_center(mark_label_data_pixel_coords)   # 加入['center']到各label的字典
-        mark_label_data_pixel_coords_centers = bbox_loc_constraint(mark_label_data_pixel_coords_centers, 
-                                                                   image_width=128, image_height=128, ignore_rate=0.05)
 
-        # 所有 label 的 pixel polygon 都超出定義邊界
+        # 轉換每個label座標 加入pixel_polygon
+        mark_label_data_pixel_coords = convert_to_pixel_coords(mark_label_data, bbox_width, bbox_height)    
+        
+        # 加入['center']到各label的字典
+        mark_label_data_pixel_coords_centers = compute_enclosing_circle_center(mark_label_data_pixel_coords)   
+        
+        # 篩選在某個邊界比例範圍的點
+        mark_label_data_pixel_coords_centers = bbox_loc_constraint(mark_label_data_pixel_coords_centers, 
+                                                                   image_width=bbox_width, image_height=bbox_height, 
+                                                                   ignore_rate=0.05)
+
+        # 若所有 label 的 pixel polygon 都超出定義邊界
         if mark_label_data_pixel_coords_centers == []:
+            print("超出邊界的 frame:", label_file_name)
             continue
         
-        mark_label_data_best_pixel_coords_centers = select_max_conf_by_class(mark_label_data_pixel_coords_centers)    # 分別找出最大 conf 的 ball, mark_o, mark_x 的 label
+        # 分別找出最大 conf 的 ball, mark_o, mark_x 的 label
+        mark_label_data_best_pixel_coords_centers = select_max_conf_by_class(mark_label_data_pixel_coords_centers)    
         
         # label_map = {0: "ball", 1: "mark_o", 2: "mark_x"}
         if label_file_name not in all_bbox_xyxy.keys():
@@ -299,39 +318,6 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
 
         all_2D_centers[label_file_name] = centers_map
     return all_2D_centers
-
-def create_LR_map(all_2D_centers):
-    """
-    all_2D_centers = {
-                        "image-0000_L.txt": {0: (ball_center_x, ball_center_y), 
-                                             1: (mark_o_center_x, mark_o_center_y)}, 
-                        "image-0001_R.txt": {0: (ball_center_x, ball_center_y), 
-                                             2: (mark_x_center_x, mark_x_center_y)}, 
-                        "image-0002_L.txt": {0: (ball_center_x, ball_center_y)}, 
-                        "image-0002_R.txt": {0: (ball_center_x, ball_center_y)}, 
-                        ...
-                     }
-    LR_map = {
-                "image-0000": {"L": "image-0000_L.txt", "R": None},
-                "image-0001": {"L": None, "R": "image-0001_R.txt"},
-                "image-0002": {"L": "image-0002_L.txt", "R": "image-0002_R.txt"}
-             }
-    """
-    LR_map = {}
-    for filename in all_2D_centers.keys():
-        if '_L.txt' in filename and 0 in all_2D_centers[filename].keys():
-            base = filename.replace('_L.txt', '')
-            if base not in LR_map:
-                LR_map[base] = {"L": None, "R": None}
-            LR_map[base]["L"] = filename
-        elif '_R.txt' in filename and 0 in all_2D_centers[filename].keys():
-            base = filename.replace('_R.txt', '')
-            if base not in LR_map:
-                LR_map[base] = {"L": None, "R": None}
-            LR_map[base]["R"] = filename
-
-    LR_map = dict(sorted(LR_map.items()))   # 依影像編號排序
-    return LR_map
 
 if __name__ == "__main__":
     pass
