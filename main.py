@@ -40,7 +40,10 @@ os.makedirs(output_sample_folder_path, exist_ok=True)
 
 camParamsPath = "CameraCalibration/STEREO_IMAGES/cvCalibration_result.txt"
 
+# 空氣動力學參數: [重力加速度 (m/s^2), 桌球質量 (kg), 空氣密度 (kg/m^3), 球的迎風面積 (m^2), 球半徑 (m), 阻力係數, 馬格努斯力係數]
+aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
 FPS = 225
+dt = 1 / FPS  # 每一幀的時間間隔 (秒)
 
 if __name__ == '__main__':
 
@@ -156,22 +159,14 @@ if __name__ == '__main__':
         # marks_o_3D, mo_reproj_error_L, mo_reproj_error_R = myDLT(camParams, lmo, rmo)
         # marks_x_3D, mx_reproj_error_L, mx_reproj_error_R = myDLT(camParams, lmx, rmx)
 
-        # for i in range(len(traj_3D)):
-        #     if traj_3D[i][0] != np.nan and lmo[i] != None and rmo[i] != None:
-        #         print(traj_3D[i])
-        #         print(lmo[i])
-        #         print(rmo[i])
-        #         input()
-
         # # 輸出 reprojection error 圖表
-        # reproj_fig = plot_reprojection_error(
+        # plot_reprojection_error(
         #     traj_reproj_error_L, traj_reproj_error_R,
         #     mo_reproj_error_L, mo_reproj_error_R,
-        #     mx_reproj_error_L, mx_reproj_error_R
+        #     mx_reproj_error_L, mx_reproj_error_R,
+        #     path = f'{output_sample_folder_path}/reprojection_errors.jpg'
         # )
-        # reproj_fig.savefig(f'{output_sample_folder_path}/reprojection_errors.jpg')
-        # print(f"✅ 已輸出至：{output_sample_folder_path}/reprojection_errors.jpg")
-
+        
         # # 將 mark_x 座標轉為 mark_o 儲存為 marks_3D
         # marks_3D = marks_o_3D
         # for i in range(len(marks_o_3D)):
@@ -181,7 +176,6 @@ if __name__ == '__main__':
         #         marks_3D[i] = mark_o_3D
 
         marks_3D = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx)    # 根據球心座標和球面方程式計算標記3D座標
-        print(len(marks_3D))
 
         # 轉換為自訂的坐標系
         corners_3D_transformed, _ = transform_coord_system(corners_3D, corners_3D)
@@ -224,102 +218,71 @@ if __name__ == '__main__':
     # Step 8: # 計算旋轉速度
     # ----------------------------------------------------------------
     # 用空氣動力學計算轉速
-    aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
-    
-    px_list, py_list, pz_list, time_segments, rps_list = [], [], [], [], []
-    dt = 1 / FPS  # 每一幀的時間間隔 (秒)
+    px_list, py_list, pz_list, time_segments, t_list = process_parabolics(traj_3D_segs, dt)
 
-    for i in range(len(traj_3D_segs)):
-        traj = traj_3D_segs[i]
-        t, px, py, pz = fit_parabolic_trajectory(traj, dt)      # 擬和拋物線
-        px_list.append(px)
-        py_list.append(py)
-        pz_list.append(pz)
-        
-        time_segments.append(t + (time_segments[-1][-1] + dt if time_segments else 0))
-
-        rps = compute_angular_velocity_rps(t, px, py, pz, aero_params)      # 帶入拋物線計算轉速
+    rps_list, spin_axis_list = [], []
+    for i, t in enumerate(t_list):
+        px, py, pz = px_list[i], py_list[i], pz_list[i]
+        rps, spin_axes = compute_angular_velocity_rps(t, px, py, pz, aero_params)      # 帶入拋物線計算轉速
         rps_list.append(rps)
+        spin_axis_list.append(np.mean(spin_axes, axis=0))
 
-    plot_trajectories_with_spin_axes_plotly(px_list, py_list, pz_list, 
-                                            traj_3D_segs, aero_params, dt, 
-                                            path=f"{output_sample_folder_path}/polynomial_curves.html")
+    plot_trajectories_with_spin_axes(px_list, py_list, pz_list, traj_3D_segs, spin_axis_list, dt, 
+                                     path=f"{output_sample_folder_path}/polynomial_curves.html")
     
     plot_angular_velocity_curves(time_segments, rps_list, 
                                  path=f"{output_sample_folder_path}/rps_aero.jpg")
 
-
     if CALCULATE_SPIN_RATE:
-        
-        # 每段軌跡逐一計算轉速
-        all_spin_axis = []
-
+        spin_axis_list = []  
         for i in range(len(traj_3D_segs)):
+            offsets = marks_3D_segs[i] - traj_3D_segs[i]        # 計算標記相對球心的位置
 
-            # 計算標記相對球心的位置
-            offsets = marks_3D_segs[i] - traj_3D_segs[i]
-            # offsets = offsets[~np.isnan(offsets).any(axis=1)]
-
-            fig, spin_axis, filtered_offsets = fit_and_plot_offset_plane(offsets)     # 擬和旋轉軸
-            all_spin_axis.append(spin_axis)
-
-            # print(len(marks_3D_segs[i][~np.isnan(marks_3D_segs[i]).any(axis=1)]))
+            plane, filtered_offsets = fit_offset_plane(offsets)     # 擬和旋轉軸
+            spin_axis = plane['normal']
+            spin_axis_list.append(spin_axis)
 
             # 刪除和旋轉軸偏差過大的標記點
             for j in range(len(filtered_offsets)):
                 if np.isnan(filtered_offsets[j][0]):
                     marks_3D_segs[i][j] = np.array([np.nan, np.nan, np.nan])
 
-            # 輸出旋轉軸圖
-            spin_axis_graph_path = f"{output_sample_folder_path}/spin_axis_seg{i+1}.html"
-            pio.write_html(fig, file=spin_axis_graph_path, auto_open=False)
-            print(f"✅ 已輸出至：{spin_axis_graph_path}")
+            plot_spin_axis(offsets, filtered_offsets, plane, path=f"{output_sample_folder_path}/spin_axis_seg{i+1}.html")
 
+        # 畫軌跡、標記、旋轉軸(分段用不同顏色區分)
         plot_multiple_3d_trajectories_with_plane(traj_3D_segs, marks_3D_segs, corners_3D_transformed, 
-                                                 all_spin_axis, output_html=f'{output_sample_folder_path}/traj_segs.html')
+                                                 spin_axis_list, output_html=f'{output_sample_folder_path}/traj_segs.html')
 
-# # ------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------
 
-#             # 如果沒有足夠的標記座標(至少三個)可以擬和平面 跳過後續轉速計算
-#             if spin_axis[0] == np.nan:
-#                 continue
+        for i in range(len(traj_3D_segs)):
+            spin_axis = spin_axis_list[i]
+            if np.isnan(spin_axis[0]):      # 如果沒有足夠的標記座標(至少三個)可以擬和平面 跳過後續轉速計算
+                continue
             
-#             candidate_rps_lists = calc_candidate_spin_rates(traj_3D_segs[i], marks_3D_segs[i], spin_axis, fps=225)
-#             rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list = candidate_rps_lists
+            candidate_rps_lists = calc_candidate_spin_rates(traj_3D_segs[i], marks_3D_segs[i], spin_axis, fps=FPS)
 
-#             print(rps_cw_list)
-#             print(rps_cw_extra_list)
-#             print(rps_ccw_list)
-#             print(rps_ccw_extra_list)
+            traj_3D_segs[i] /= 1000    # mm轉為公尺
 
-#             rps_cw = np.mean(rps_cw_list)
-#             rps_cw_extra = np.mean(rps_cw_extra_list)
-#             rps_ccw = np.mean(rps_ccw_list)
-#             rps_ccw_extra = np.mean(rps_ccw_extra_list)
+            # 計算每一幀的速度 (Ground Truth)
+            velocity_gt = np.diff(traj_3D_segs[i], axis=0) * FPS    # 速度計算
+            acceleration_gt = np.diff(velocity_gt, axis=0) * FPS    # 加速度計算
 
-#             # 空氣動力學參數: [重力加速度 (m/s^2), 桌球質量 (kg), 空氣密度 (kg/m^3), 球的迎風面積 (m^2), 球半徑 (m), 阻力係數, 馬格努斯力係數]
-#             aero_params = {'g':9.8, 'm':0.0027, 'rho':1.2, 'A':0.001256, 'r':0.02, 'Cd':0.5, 'Cm':1.23}
+            # 設定模擬步數
+            num_steps = len(traj_3D_segs[i])
 
-#             traj_3D = traj_3D_segs[i] / 1000    # 轉為公尺
+            print(f"\n== Traj_{i+1} ==")
+            # 計算四種旋轉速度回推的軌跡
+            candidate_trajectories = []
+            for j, candidate_rps_list in enumerate(candidate_rps_lists):
+                rps = find_best_rps(candidate_rps_list)
+                print(f"candidate_{j+1}: {rps}")
+                candidate_traj = compute_trajectory_aero(velocity_gt[0], traj_3D_segs[i][0], rps, dt, num_steps, spin_axis, aero_params)
+                candidate_trajectories.append(candidate_traj)
 
-#             # 計算每一幀的速度 (Ground Truth)
-#             dt = 1 / FPS                                            # 每一幀的時間間隔 (秒)
-#             velocity_gt = np.diff(traj_3D, axis=0) * FPS            # 速度計算
-#             acceleration_gt = np.diff(velocity_gt, axis=0) * FPS    # 加速度計算
+            trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra = candidate_trajectories
+            draw_candidate_trajectories(traj_3D_segs[i], trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, 
+                                        f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html")
 
-#             # 設定模擬步數
-#             num_steps = len(traj_3D)
-
-#             # 計算四種旋轉速度回推的軌跡
-#             candidate_trajectories = []
-#             for rps_list in candidate_rps_lists:
-#                 rps = np.mean(rps_list)
-#                 traj = compute_trajectory_aero(velocity_gt[0], traj_3D[0], rps, dt, num_steps, spin_axis, aero_params)
-#                 candidate_trajectories.append(traj)
-
-#             trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra = candidate_trajectories
-#             draw_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, 
-#                               f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html")
-
-#             print("Corrected Rotation Axis (Plane Normal):", spin_axis)
-#             print(rps_cw, rps_cw_extra, rps_ccw, rps_ccw_extra)
+            # print("Rotation Axis (Plane Normal):", spin_axis)
+            # print(rps_cw, rps_cw_extra, rps_ccw, rps_ccw_extra)

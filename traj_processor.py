@@ -387,5 +387,16 @@ def fit_parabolic_trajectory(traj, dt, degree=2):
     pz = Polynomial.fit(t, traj_m[:, 2], deg=degree).convert()
     return t, px, py, pz
 
+def process_parabolics(traj_3D_segs, dt):
+    px_list, py_list, pz_list, time_segments, t_list = [], [], [], [], []
+    for i in range(len(traj_3D_segs)):
+        t, px, py, pz = fit_parabolic_trajectory(traj_3D_segs[i], dt)      # 擬和拋物線
+        px_list.append(px)
+        py_list.append(py)
+        pz_list.append(pz)
+        time_segments.append(t + (time_segments[-1][-1] + dt if time_segments else 0))
+        t_list.append(t)
+    return px_list, py_list, pz_list, time_segments, t_list
+
 if __name__ == "__main__":
     pass
