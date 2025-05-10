@@ -156,6 +156,7 @@ if __name__ == '__main__':
         
         corners_3D, _, _ = myDLT(camParams, left_corners, right_corners)
         traj_3D, traj_reproj_error_L, traj_reproj_error_R = myDLT(camParams, lb, rb)
+
         # marks_o_3D, mo_reproj_error_L, mo_reproj_error_R = myDLT(camParams, lmo, rmo)
         # marks_x_3D, mx_reproj_error_L, mx_reproj_error_R = myDLT(camParams, lmx, rmx)
 

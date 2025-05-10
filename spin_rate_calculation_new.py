@@ -2,6 +2,8 @@ import numpy as np
 from scipy.stats import gaussian_kde
 
 def find_best_rps(rps_list):
+    if len(rps_list) == 1:
+        return rps_list[0]
     kde = gaussian_kde(rps_list)  # 進行 KDE（核密度估計）
     xs = np.linspace(min(rps_list), max(rps_list), 1000)    # 建立評估點
     kde_values = kde(xs)

@@ -49,20 +49,20 @@ def fit_offset_plane(offsets, angle_thres=45):  # angle_thres in degrees
     y_axis = vh[1]
     plane = {'normal': normal, 'x_axis': x_axis, 'y_axis': y_axis}
 
-    angle_cos_thres = np.cos(np.deg2rad(angle_thres))
-
     filtered_offsets = []
     for o in offsets:
         if np.isnan(o).any():
             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
             continue
 
-        cos_theta = np.abs(np.dot(o, normal))
-        # cos_theta = np.abs(np.dot(vec / vec_norm, normal))
-        if cos_theta < angle_cos_thres:  # 夾角 > angle_thres
-            filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
-        else:
+        cos_theta = np.clip(np.dot(o, normal) / (np.linalg.norm(o) * np.linalg.norm(normal)), -1.0, 1.0)
+        theta = np.arccos(cos_theta)
+        theta = theta * 360 / (2 * np.pi)
+
+        if theta > angle_thres and theta < 180 - angle_thres:
             filtered_offsets.append(o)
+        else:
+            filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
 
     return plane, filtered_offsets
 
