@@ -1,187 +1,13 @@
 import cv2
 import numpy as np
-import os
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d
-from sklearn.decomposition import PCA
-from sklearn.ensemble import IsolationForest
-from sklearn.cluster import DBSCAN
 from scipy.interpolate import interp1d
 from pykalman import KalmanFilter
 from numpy.polynomial.polynomial import Polynomial
-
-# 簡易 Kalman filter：使用 constant velocity model 進行平滑
-def simple_kalman_filter_3d(trajectory, FPS, R=25.0, Q=1.0):
-    n = len(trajectory)
-    dt = 1 / FPS  # 假設等間隔
-
-    # 初始狀態 [x, y, z, vx, vy, vz]
-    x = np.hstack((trajectory[0], [0, 0, 0]))
-    P = np.eye(6) * 1000  # 初始協方差大
-
-    # transition matrix F
-    F = np.eye(6)
-    for i in range(3):
-        F[i, i+3] = dt
-
-    # observation matrix H
-    H = np.zeros((3, 6))
-    H[0, 0] = 1
-    H[1, 1] = 1
-    H[2, 2] = 1
-
-    # noise matrices
-    R_matrix = np.eye(3) * R
-    Q_matrix = np.eye(6) * Q
-
-    smoothed = []
-    for z in trajectory:
-        # predict
-        x = F @ x
-        P = F @ P @ F.T + Q_matrix
-
-        # update
-        y = z - H @ x
-        S = H @ P @ H.T + R_matrix
-        K = P @ H.T @ np.linalg.inv(S)
-        x = x + K @ y
-        P = (np.eye(6) - K @ H) @ P
-
-        smoothed.append(x[:3])
-    return np.array(smoothed)
-
-def remove_outliers_with_pca(points, contamination=0.02):
-    """
-    對3D點雲資料執行主成分分析與離群值剔除，並儲存與回傳過濾後的結果。
-    """
-    # PCA（用於降維後再進行離群值偵測）
-    pca = PCA(n_components=3)
-    points_pca = pca.fit_transform(points)
-
-    # 離群值偵測
-    iso_forest = IsolationForest(contamination=contamination, random_state=42)
-    outliers = iso_forest.fit_predict(points_pca)
-    filtered_points = points[outliers == 1]
-
-    # # 視覺化原始與過濾後的結果
-    # fig = plt.figure(figsize=(12, 6))
-
-    # # 原始資料
-    # ax1 = fig.add_subplot(121, projection='3d')
-    # ax1.scatter(points[:, 0], points[:, 1], points[:, 2], s=5, label='Original')
-    # ax1.set_title("Original 3D Points")
-
-    # # 過濾後資料
-    # ax2 = fig.add_subplot(122, projection='3d')
-    # ax2.scatter(filtered_points[:, 0], filtered_points[:, 1], filtered_points[:, 2], s=5, c='g', label='Filtered')
-    # ax2.set_title("Filtered (Outliers Removed)")
-
-    # plt.tight_layout()
-    # plt.show()
-
-    return filtered_points
-
-def remove_outliers_stronger(points, contamination=0.02, std_threshold=2.5):
-    """
-    強化版離群值剔除：先用 PCA + IsolationForest，再用 Z-score 移除極端值。
-
-    Parameters:
-        input_path (str): 輸入txt路徑
-        output_path (str): 儲存路徑（預設為 *_filtered_strict.txt）
-        contamination (float): IsolationForest 的離群比例
-        std_threshold (float): Z-score 標準差門檻（預設為2.5）
-        save_result (bool): 是否儲存檔案
-
-    Returns:
-        numpy.ndarray: 最終過濾後點雲
-    """
-
-    # 第一步：PCA + IsolationForest
-    pca = PCA(n_components=1)
-    pca_transformed = pca.fit_transform(points)
-
-    iso = IsolationForest(contamination=contamination, random_state=42)
-    mask_iforest = iso.fit_predict(pca_transformed) == 1
-    filtered = points[mask_iforest]
-
-    # 第二步：Z-score 清除極端值
-    mean = np.mean(filtered, axis=0)
-    std = np.std(filtered, axis=0)
-    z_scores = np.abs((filtered - mean) / std)
-    mask_zscore = np.all(z_scores < std_threshold, axis=1)
-    final_filtered = filtered[mask_zscore]
-
-    return final_filtered
-
-def remove_outliers_by_dbscan(traj_3D, eps=10, min_samples=5):
-    traj_3D = np.array(traj_3D)
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(traj_3D)
-    labels = clustering.labels_
-    main_label = np.argmax(np.bincount(labels[labels >= 0]))  # 取得最大群
-    mask = labels == main_label
-    return traj_3D[mask], mask
-
-def remove_outliers_by_speed(traj_3D, max_speed_threshold=30):
-    traj_3D = np.array(traj_3D)
-    diffs = np.linalg.norm(np.diff(traj_3D, axis=0), axis=1)
-    mask = np.ones(len(traj_3D), dtype=bool)
-    mask[1:] &= diffs < max_speed_threshold
-    mask[:-1] &= diffs < max_speed_threshold
-    return traj_3D[mask], mask
+from pykalman import KalmanFilter
+from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
 
 def detect_table_tennis_collisions(traj, table_corners, z_tolerance=0.05):
-    """
-    偵測桌球最多三次碰撞點：第一次（落桌）、第二次（擊球）、第三次（回擊）
-    條件：
-        - 撞擊點需在球桌範圍內
-        - Z 軸需接近桌面高度
-        - 根據 Y 軸進行分區：前後場與拍擊位置
-
-    :param traj: (N, 3) 的軌跡資料 (X, Y, Z)
-    :param table_corners: (4, 3) 的球桌四角座標
-    :param z_tolerance: 與桌面高度的容許誤差
-    :return: [(idx1, point1), (idx2, point2), (idx3, point3)] (最多三項)
-    """
-    traj = np.array(traj)
-    table_corners = np.array(table_corners)
-
-    # 桌面範圍與高度估計
-    x_min, x_max = table_corners[:, 0].min(), table_corners[:, 0].max()
-    y_min, y_max = table_corners[:, 1].min(), table_corners[:, 1].max()
-    z_table = table_corners[:, 2].mean()
-    net_y = (y_min + y_max) / 2
-
-    def is_near_table(pos):
-        x, y, z = pos
-        return (x_min <= x <= x_max) and (y_min <= y <= y_max) and (abs(z - z_table) < z_tolerance)
-
-    # 第一次碰撞：網子對面半場 z 最小
-    first_candidates = [(i, p[2]) for i, p in enumerate(traj) if p[1] > net_y and is_near_table(p)]
-    first_hit = min(first_candidates, key=lambda x: x[1])[0] if first_candidates else None
-
-    # 第二次碰撞：Y 最大點（擊球），要在 first_hit 之後
-    second_hit = None
-    if first_hit is not None:
-        y_vals_after_first = traj[first_hit + 1:, 1]
-        if len(y_vals_after_first) > 0:
-            second_hit_rel = np.argmax(y_vals_after_first)
-            second_hit = first_hit + 1 + second_hit_rel
-
-    # 第三次碰撞：網子這側 z 最小，要在 second_hit 之後
-    third_hit = None
-    if second_hit is not None:
-        third_candidates = [(i, p[2]) for i, p in enumerate(traj[second_hit + 1:], start=second_hit + 1)
-                            if p[1] < net_y and is_near_table(p)]
-        if third_candidates:
-            third_hit = min(third_candidates, key=lambda x: x[1])[0]
-
-    # 整理回傳 (index, point)
-    collision_indices = [first_hit, second_hit, third_hit]
-    results = [(idx, traj[idx]) for idx in collision_indices if idx is not None]
-    return results
-
-def detect_table_tennis_collisions_sequential(traj, table_corners, z_tolerance=0.05):
     """
     更嚴謹的三次碰撞點偵測：根據 Z 軌跡的先下降再上升的轉折點為主
     條件：
@@ -246,7 +72,7 @@ def split_trajectory_by_collisions(traj, collisions):
             segments.append(traj[start_idx:idx + 1])  # 包含碰撞點
             start_idx = idx + 1
 
-    if start_idx < len(traj):
+    if start_idx < len(traj) - 10:  # 如果start_idx接近尾端 就不要插入後續軌跡
         segments.append(traj[start_idx:])  # 剩下的當作最後一段
 
     return segments
@@ -269,6 +95,44 @@ def remove_velocity_outliers(traj_3D, threshold_std=3):
     cleaned_traj = traj_3D.copy()
     cleaned_traj[outlier_mask] = np.nan
     return cleaned_traj
+
+def remove_outliers_by_knn_distance(traj, k=5, sigma_thres=3.0):
+    """
+    根據與最近鄰點的平均距離找離群點（空間孤立性），並將離群點設為 NaN。
+
+    Args:
+        traj (ndarray): shape (N, 3)，含 NaN 的 3D 軌跡資料。
+        k (int): 最近鄰數量（包含自己，預設5）。
+        sigma_thres (float): 超過 mean + sigma_thres * std 的點視為離群。
+
+    Returns:
+        cleaned_traj (ndarray): 相同 shape，離群點設為 [nan, nan, nan]。
+        outlier_indices (list): 離群點在原始資料中的索引。
+    """
+    traj = np.array(traj)
+    valid_mask = ~np.isnan(traj).any(axis=1)
+    valid_points = traj[valid_mask]
+    valid_indices = np.where(valid_mask)[0]
+
+    # 計算每個點與其 k-1 個鄰居的距離（排除自己）
+    nbrs = NearestNeighbors(n_neighbors=k).fit(valid_points)
+    distances, _ = nbrs.kneighbors(valid_points)
+    mean_neighbor_dist = distances[:, 1:].mean(axis=1)
+
+    # 找出離群門檻
+    dist_mean = mean_neighbor_dist.mean()
+    dist_std = mean_neighbor_dist.std()
+    threshold = dist_mean + sigma_thres * dist_std
+
+    # 找出離群點索引
+    outlier_local_idx = np.where(mean_neighbor_dist > threshold)[0]
+    outlier_indices = valid_indices[outlier_local_idx]
+
+    # 清除離群點
+    cleaned_traj = traj.copy()
+    cleaned_traj[outlier_indices] = [np.nan, np.nan, np.nan]
+
+    return cleaned_traj, outlier_indices.tolist()
 
 def interpolate_and_moving_average(traj_3D, window=5):
     traj_3D = np.array(traj_3D, dtype=np.float64)
@@ -294,10 +158,62 @@ def interpolate_and_moving_average(traj_3D, window=5):
     
     return smoothed_traj
 
+# def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
+#     """
+#     對3D軌跡進行線性內插與卡爾曼平滑，並在首尾延伸虛擬點減少邊界效應。
+
+#     Parameters:
+#     - traj_3D: shape (N, 3) 的陣列，可能含有 NaN。
+#     - smooth_strength: 平滑強度，越大代表越平滑。
+#     - extend_points: 首尾要延伸的虛擬點數量。
+
+#     Returns:
+#     - smoothed_traj: 經平滑後的3D軌跡，長度與原始輸入相同。
+#     """
+#     traj_3D = np.array(traj_3D, dtype=np.float64)
+#     mask = ~np.isnan(traj_3D).any(axis=1)
+    
+#     full_indices = np.arange(len(traj_3D))
+#     interp_traj = np.empty_like(traj_3D)
+
+#     for i in range(3):
+#         valid_idx = full_indices[mask]
+#         valid_vals = traj_3D[mask, i]
+#         interp_traj[:, i] = np.interp(full_indices, valid_idx, valid_vals)
+
+#     # 延伸首尾
+#     head_dir = interp_traj[1] - interp_traj[0]
+#     tail_dir = interp_traj[-1] - interp_traj[-2]
+#     head_extend = [interp_traj[0] - head_dir * (i+1) for i in range(extend_points)][::-1]
+#     tail_extend = [interp_traj[-1] + tail_dir * (i+1) for i in range(extend_points)]
+
+#     extended_traj = np.vstack([head_extend, interp_traj, tail_extend])
+
+#     # 調整平滑程度
+#     transition_cov = np.diag([1e-4 * smooth_strength]*3 + [1e-6 * smooth_strength]*3)
+#     observation_cov = np.eye(3) * 1e-2 / smooth_strength
+
+#     kf = KalmanFilter(
+#         transition_matrices=np.eye(6),
+#         observation_matrices=np.hstack([np.eye(3), np.zeros((3, 3))]),
+#         transition_covariance=transition_cov,
+#         observation_covariance=observation_cov,
+#         initial_state_mean=np.hstack([extended_traj[0], [0, 0, 0]]),
+#         initial_state_covariance=np.eye(6) * 1e-1
+#     )
+
+#     smoothed_state_means, _ = kf.smooth(extended_traj)
+#     smoothed_traj = smoothed_state_means[:, :3]
+
+#     # 裁切掉首尾延伸的部分
+#     smoothed_traj = smoothed_traj[extend_points:-extend_points]
+
+#     return smoothed_traj
+
 import numpy as np
 from pykalman import KalmanFilter
 
-def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
+def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5, dt=1.0):
     """
     對3D軌跡進行線性內插與卡爾曼平滑，並在首尾延伸虛擬點減少邊界效應。
 
@@ -305,13 +221,14 @@ def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
     - traj_3D: shape (N, 3) 的陣列，可能含有 NaN。
     - smooth_strength: 平滑強度，越大代表越平滑。
     - extend_points: 首尾要延伸的虛擬點數量。
+    - dt: 每個時間步長，預設為 1.0。
 
     Returns:
     - smoothed_traj: 經平滑後的3D軌跡，長度與原始輸入相同。
     """
     traj_3D = np.array(traj_3D, dtype=np.float64)
     mask = ~np.isnan(traj_3D).any(axis=1)
-    
+
     full_indices = np.arange(len(traj_3D))
     interp_traj = np.empty_like(traj_3D)
 
@@ -320,31 +237,40 @@ def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
         valid_vals = traj_3D[mask, i]
         interp_traj[:, i] = np.interp(full_indices, valid_idx, valid_vals)
 
-    # 延伸首尾
-    head_dir = interp_traj[1] - interp_traj[0]
-    tail_dir = interp_traj[-1] - interp_traj[-2]
-    head_extend = [interp_traj[0] - head_dir * (i+1) for i in range(extend_points)][::-1]
-    tail_extend = [interp_traj[-1] + tail_dir * (i+1) for i in range(extend_points)]
-
+    # 延伸首尾（可留原邏輯）
+    head_dir = np.mean(interp_traj[1:6] - interp_traj[0:5], axis=0)
+    tail_dir = np.mean(interp_traj[-5:] - interp_traj[-6:-1], axis=0)
+    noise = np.random.normal(scale=0.001, size=(extend_points, 3))
+    head_extend = [interp_traj[0] - head_dir * (i+1) + noise[i] for i in range(extend_points)][::-1]
+    tail_extend = [interp_traj[-1] + tail_dir * (i+1) + noise[i] for i in range(extend_points)]
     extended_traj = np.vstack([head_extend, interp_traj, tail_extend])
 
-    # 調整平滑程度
-    transition_cov = np.diag([1e-4 * smooth_strength]*3 + [1e-6 * smooth_strength]*3)
+    # === transition matrix 加入速度模型 ===
+    F = np.eye(6)
+    F[0, 3] = F[1, 4] = F[2, 5] = dt
+
+    # === observation matrix（只觀察位置）===
+    H = np.hstack([np.eye(3), np.zeros((3, 3))])
+
+    # === 設定 initial_state，速度用首兩點估算 ===
+    init_vel = (extended_traj[1] - extended_traj[0]) / dt
+    initial_state_mean = np.hstack([extended_traj[0], init_vel])
+
+    # === 放寬 transition_cov，提升靈活度 ===
+    transition_cov = np.diag([1e-3 * smooth_strength]*3 + [1e-4 * smooth_strength]*3)
     observation_cov = np.eye(3) * 1e-2 / smooth_strength
 
     kf = KalmanFilter(
-        transition_matrices=np.eye(6),
-        observation_matrices=np.hstack([np.eye(3), np.zeros((3, 3))]),
+        transition_matrices=F,
+        observation_matrices=H,
         transition_covariance=transition_cov,
         observation_covariance=observation_cov,
-        initial_state_mean=np.hstack([extended_traj[0], [0, 0, 0]]),
+        initial_state_mean=initial_state_mean,
         initial_state_covariance=np.eye(6) * 1e-1
     )
 
     smoothed_state_means, _ = kf.smooth(extended_traj)
     smoothed_traj = smoothed_state_means[:, :3]
-
-    # 裁切掉首尾延伸的部分
     smoothed_traj = smoothed_traj[extend_points:-extend_points]
 
     return smoothed_traj

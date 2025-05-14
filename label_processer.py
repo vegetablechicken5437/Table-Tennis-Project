@@ -105,8 +105,11 @@ def compute_enclosing_circle_center(label_data):
         contour = np.array(item["pixel_polygon"], dtype=np.int32)
 
         # 計算最小外接圓
-        (x, y), radius = cv2.minEnclosingCircle(contour)
-        center = (int(x), int(y))
+        if item["pixel_polygon"]:
+            (x, y), radius = cv2.minEnclosingCircle(contour)
+            center = (int(x), int(y))
+        else:
+            center = None
 
         # 儲存中心點
         item["center"] = center
@@ -217,7 +220,7 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
     filtered_ball_label_files = filter_lr_files(ball_label_files)  # 過濾只保留同時擁有 L 和 R 的檔案
 
     all_bbox_xyxy = {}
-    for label_file_name in filtered_ball_label_files:
+    for label_file_name in tqdm(filtered_ball_label_files):
         label_path = os.path.join(ball_bbox_label_path, label_file_name)    # 讀取影像中的 bbox labels
         ball_label_data = read_bbox_labels(label_path)  
         ball_label_data_pixel_coords = convert_to_pixel_coords(ball_label_data, image_width, image_height)  # 轉換並加入pixel_polygon
@@ -226,8 +229,8 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
 
         # 所有 label 的 pixel polygon 都超出定義邊界
         if ball_label_data_pixel_coords == []:
-            print("超出邊界的 frames:")
-            print(label_file_name)
+            # print("超出邊界的 frames:")
+            # print(label_file_name)
             continue
 
         ball_label_data_best_pixel_coords = select_max_conf_by_class(ball_label_data_pixel_coords)    # 篩選最大 conf 的 label
@@ -274,7 +277,8 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
     """
     all_2D_centers = {}
     mark_label_files = os.listdir(mark_poly_label_path)
-    for label_file_name in mark_label_files:
+    print('🚀 輸出左右影像的2D點(球和標記) ...')
+    for label_file_name in tqdm(mark_label_files):
         label_path = os.path.join(mark_poly_label_path, label_file_name)
         mark_label_data = read_poly_labels(label_path)
 
@@ -291,7 +295,7 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
 
         # 若所有 label 的 pixel polygon 都超出定義邊界
         if mark_label_data_pixel_coords_centers == []:
-            print("超出邊界的 frame:", label_file_name)
+            # print("超出邊界的 frame:", label_file_name)
             continue
         
         # 分別找出最大 conf 的 ball, mark_o, mark_x 的 label

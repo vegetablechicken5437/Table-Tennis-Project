@@ -6,10 +6,18 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import random
 
-def draw_candidate_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra, save_path):
+def plot_candidate_trajectories(traj_3D, candidate_trajectories, spin_axis, corners_3D, save_path=None):
     """
     使用 Plotly 繪製桌球運動軌跡，並儲存圖像為 HTML 檔案。
     """
+    purple_shades = [
+        'rgb(160, 32, 240)', 'rgb(128, 0, 128)', 'rgb(186, 85, 211)',
+        'rgb(138, 43, 226)', 'rgb(147, 112, 219)', 'rgb(153, 50, 204)'
+    ]
+    axis_length = 0.2
+
+    trajectory_cw, trajectory_cw_extra, trajectory_ccw, trajectory_ccw_extra = candidate_trajectories
+
     fig = go.Figure()
 
     # 添加 Ground Truth
@@ -41,6 +49,51 @@ def draw_candidate_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, tra
         name="CCW + 360°"
     ))
 
+    # 畫對應旋轉軸（在該軌跡中間）
+    axis_vec = np.array(spin_axis)
+    if np.linalg.norm(axis_vec) > 1e-6 and len(traj_3D) > 0:
+        unit_axis = axis_vec / np.linalg.norm(axis_vec)
+        midpoint = traj_3D[len(traj_3D)//2]
+        end_point = midpoint + unit_axis * axis_length
+        color = purple_shades[0]
+
+        fig.add_trace(go.Scatter3d(
+            x=[midpoint[0], end_point[0]],
+            y=[midpoint[1], end_point[1]],
+            z=[midpoint[2], end_point[2]],
+            mode='lines+markers',
+            line=dict(color=color, width=5, dash='dash'),
+            marker=dict(size=4, color=color),
+            name=f'Rotation Axis'
+        ))
+
+    # 畫矩形平面
+    x_corners, y_corners, z_corners = zip(*corners_3D)
+    x_plane = list(x_corners) + [x_corners[0]]
+    y_plane = list(y_corners) + [y_corners[0]]
+    z_plane = list(z_corners) + [z_corners[0]]
+
+    fig.add_trace(go.Mesh3d(
+        x=x_corners,
+        y=y_corners,
+        z=z_corners,
+        i=[0, 0],
+        j=[1, 2],
+        k=[2, 3],
+        color='lightgreen',
+        opacity=0.5,
+        name='Rectangle Plane'
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=x_plane,
+        y=y_plane,
+        z=z_plane,
+        mode='lines',
+        line=dict(color='green', width=6),
+        name='Rectangle Edge'
+    ))
+
     # 設定圖表標籤與視角
     fig.update_layout(
         title="Aerodynamics-Adjusted Table Tennis Ball Trajectories",
@@ -48,6 +101,7 @@ def draw_candidate_trajectories(traj_3D, trajectory_cw, trajectory_cw_extra, tra
             xaxis_title="X Position (m)",
             yaxis_title="Y Position (m)",
             zaxis_title="Z Position (m)",
+            aspectmode='data'
         ),
         margin=dict(l=0, r=0, b=0, t=40)
     )
@@ -184,23 +238,16 @@ def plot_multiple_3d_trajectories_with_plane(
     pio.write_html(fig, file=output_html, auto_open=False)
     print(f"✅ 已輸出至：{output_html}")
 
-def plot_reprojection_error(
-    traj_reproj_error_L, traj_reproj_error_R,
-    mo_reproj_error_L, mo_reproj_error_R,
-    mx_reproj_error_L, mx_reproj_error_R,
-    path = None
-):
+def plot_reprojection_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_error_L, m_reproj_error_R, path=None):
     # 將所有誤差 list 與標籤打包
     error_lists = [
         (traj_reproj_error_L, "Traj Left"),
-        (mo_reproj_error_L, "Mark O Left"),
-        (mx_reproj_error_L, "Mark X Left"),
         (traj_reproj_error_R, "Traj Right"),
-        (mo_reproj_error_R, "Mark O Right"),
-        (mx_reproj_error_R, "Mark X Right")
+        (m_reproj_error_L, "Mark Left"),
+        (m_reproj_error_R, "Mark Right")
     ]
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
     axes = axes.flatten()
 
     for idx, (errors, title) in enumerate(error_lists):
@@ -239,11 +286,11 @@ def plot_angular_velocity_curves(t_list, rps_list, path):
     plt.tight_layout()
     plt.savefig(path)
 
-def plot_trajectories_with_spin_axes(px_list, py_list, pz_list, original_trajs, spin_axis_list, dt, path=None, scale_factor=0.1):
+def plot_trajectories_with_spin_axes(px_list, py_list, pz_list, spin_axis_list, traj_3D_segs, dt, path=None, scale_factor=0.1):
     plotly_colors = ['blue', 'orange', 'green', 'red']
     fig = go.Figure()
 
-    for i, (px, py, pz, traj, spin_axis) in enumerate(zip(px_list, py_list, pz_list, original_trajs, spin_axis_list)):
+    for i, (px, py, pz, traj, spin_axis) in enumerate(zip(px_list, py_list, pz_list, traj_3D_segs, spin_axis_list)):
         t = np.arange(len(traj)) * dt
         t_fine = np.linspace(t[0], t[-1], 300)
         x_fit = px(t_fine)
@@ -267,31 +314,6 @@ def plot_trajectories_with_spin_axes(px_list, py_list, pz_list, original_trajs, 
             name=f'Traj {i+1} (raw)',
             opacity=0.3
         ))
-
-        # # 平均分配 spin_axes 畫在對應位置上
-        # n_arrows = len(spin_axes)
-        # indices = np.linspace(0, len(t_fine) - 1, n_arrows, dtype=int)
-
-        # for j, (axis_vec, idx) in enumerate(zip(spin_axes, indices)):
-        #     # 縮放旋轉軸方向
-        #     if np.linalg.norm(axis_vec) > 1e-6:
-        #         axis_scaled = axis_vec / np.linalg.norm(axis_vec) * scale_factor
-        #     else:
-        #         axis_scaled = np.zeros_like(axis_vec)
-
-        #     origin = np.array([px(t_fine[idx]), py(t_fine[idx]), pz(t_fine[idx])])
-        #     arrow_end = origin + axis_scaled
-
-        #     fig.add_trace(go.Scatter3d(
-        #         x=[origin[0], arrow_end[0]],
-        #         y=[origin[1], arrow_end[1]],
-        #         z=[origin[2], arrow_end[2]],
-        #         mode='lines+markers',
-        #         line=dict(color=plotly_colors[i % len(plotly_colors)], width=5),
-        #         marker=dict(size=3, color=plotly_colors[i % len(plotly_colors)]),
-        #         name=f'Traj {i+1} Spin Axis {j+1}',
-        #         showlegend=False
-        #     ))
 
         # 選擇中點 rps 畫箭頭
         t0 = t[len(t) // 2]
@@ -321,7 +343,7 @@ def plot_trajectories_with_spin_axes(px_list, py_list, pz_list, original_trajs, 
     if path:
         pio.write_html(fig, file=path, auto_open=False)
 
-def plot_spin_axis(offsets, filtered_offsets, plane, path=None, scale_factor=1.2):
+def plot_spin_axis_with_fit_plane(offsets, filtered_offsets, plane, path=None, scale_factor=1.2):
 
     normal, x_axis, y_axis = plane['normal'], plane['x_axis'], plane['y_axis']
 
@@ -402,3 +424,83 @@ def plot_spin_axis(offsets, filtered_offsets, plane, path=None, scale_factor=1.2
     if path:
         pio.write_html(fig, file=path, auto_open=False)
         print(f"✅ 已輸出至：{path}")
+
+def plot_projected_marks_on_plane_all_frame(valid_data, plane_normal, save_html=None):
+    # 建立 Frames
+    frames = []
+    for i, v1, v2, theta in valid_data:
+        rotation_axis_end = plane_normal / np.linalg.norm(plane_normal) * 0.8
+
+        frames.append(go.Frame(
+            data=[
+                go.Scatter3d(x=[0, v1[0]], y=[0, v1[1]], z=[0, v1[2]],
+                             mode='lines+markers', line=dict(color='blue', width=8), name='v1'),
+                go.Scatter3d(x=[0, v2[0]], y=[0, v2[1]], z=[0, v2[2]],
+                             mode='lines+markers', line=dict(color='red', width=8), name='v2'),
+                go.Scatter3d(x=[0, rotation_axis_end[0]], y=[0, rotation_axis_end[1]], z=[0, rotation_axis_end[2]],
+                             mode='lines+markers', line=dict(color='green', width=6, dash='dash'), name='rotation_axis'),
+            ],
+            name=str(i),
+            layout=go.Layout(
+                annotations=[
+                    dict(
+                        showarrow=False,
+                        text=f"<b>Frame: {i} | θ: {theta:.2f}°</b>",
+                        xref="paper", yref="paper",
+                        x=0.01, y=0.95,
+                        font=dict(size=20, color="black"),
+                        align="left",
+                        bordercolor="black",
+                        borderwidth=0
+                    )
+                ]
+            )
+        ))
+
+    # 初始資料與 Slider
+    fig = go.Figure(
+        data=frames[0].data,
+        layout=go.Layout(
+            title=dict(text="<b>Spin Vector Visualization</b>", font=dict(size=24)),
+            scene=dict(
+                xaxis=dict(range=[-1, 1], title='X'),
+                yaxis=dict(range=[-1, 1], title='Y'),
+                zaxis=dict(range=[-1, 1], title='Z'),
+                aspectmode='cube'
+            ),
+            margin=dict(l=0, r=0, b=0, t=40),
+            updatemenus=[dict(
+                type="buttons",
+                showactive=False,
+                y=1.15,
+                x=0,
+                xanchor="left",
+                buttons=[
+                    dict(label="▶ Play", method="animate",
+                         args=[None, {"frame": {"duration": 700, "redraw": True}, "fromcurrent": True}]),
+                    dict(label="⏸ Pause", method="animate",
+                         args=[[None], {"frame": {"duration": 0}, "mode": "immediate"}])
+                ]
+            )],
+            sliders=[{
+                "active": 0,
+                "yanchor": "top",
+                "xanchor": "left",
+                "currentvalue": {
+                    "prefix": "Frame: ",
+                    "font": {"size": 18}
+                },
+                "pad": {"t": 30},
+                "steps": [{
+                    "method": "animate",
+                    "label": str(i),
+                    "args": [[str(i)], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate"}]
+                } for i, *_ in valid_data]
+            }]
+        ),
+        frames=frames
+    )
+
+    fig.write_html(save_html)
+    print(f"✅ 動畫已儲存至 {save_html}")
+

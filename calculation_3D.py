@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+from visualize_functions import plot_reprojection_error
 
 def read_calibration_file(path):
     data = {}
@@ -291,8 +292,6 @@ def visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L
         t_nearest = min(valid_ts)
         return (C + t_nearest * d,)
 
-
-
     def select_closest(points, center):
         return min(points, key=lambda p: np.linalg.norm(p - center))
 
@@ -363,8 +362,6 @@ def visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L
             name='R: viewing direction'
         ))
 
-
-
         # 預估點（貼合球面）
         P_est_raw = (P_L_sel + P_R_sel) / 2
         P_est = center + radius * (P_est_raw - center) / np.linalg.norm(P_est_raw - center)
@@ -379,22 +376,21 @@ def visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, filename)
     pio.write_html(fig, file=output_path, auto_open=False)
-    print(f"✅ 圖已輸出至：{output_path}")
 
     return P_est
 
 
-def get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx):
+def get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx, output_dir=None):
 
     K_L, K_R = camParams['LeftCamK'], camParams['RightCamK']
     RT_L, RT_R = camParams['LeftCamRT'], camParams['RightCamRT']
 
-    marks_3D = []
-    for i in range(len(traj_3D)):
+    marks_3D, reproj_errors_L, reproj_errors_R = [], [], []
 
+    print(f"🚀 計算並視覺化標記3D座標...")
+    for i in tqdm(range(len(traj_3D))):
         C_ball = traj_3D[i]
-        
-        # 如果只有其中一邊偵測到標記 用球面方程式計算
+        # 如果兩邊都偵測到標記，計算左右相機連接標記的射線 射出後 與球面的交點
         if lmo[i] and rmo[i]:
             uv_L, uv_R = lmo[i], rmo[i]
             mark_type = 'mark_o'
@@ -403,21 +399,32 @@ def get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx):
             mark_type = 'mark_x'
         else:   
             marks_3D.append(np.array([np.nan, np.nan, np.nan]))
+            reproj_errors_L.append(np.nan)
+            reproj_errors_R.append(np.nan)
             continue
 
-        # P_mark = estimate_marker_3d_on_sphere(K_L, K_R, RT_L, RT_R, uv_L, uv_R, C_ball, radius=20)
         P_mark = visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L, uv_R, C_ball, radius=20,
-                                                  output_dir='marks_intersection', filename=f'frame_{i+1}.html')
-        # visualize_ray_intersection_and_projection(K_L, K_R, RT_L, RT_R, uv_L, uv_R, C_ball, radius=20,
-        #                                           output_dir='marks_intersection', filename=f'frame_{i+1}.html')
-        # continue
+                                                                   output_dir=output_dir, 
+                                                                   filename=f'frame_{i+1}.html')
+
+        if np.isnan(P_mark[0]):
+            marks_3D.append(P_mark)
+            reproj_errors_L.append(np.nan)
+            reproj_errors_R.append(np.nan)
+            continue
+
+        error_L = reprojection_error(P_mark, K_L, RT_L, uv_L)
+        error_R = reprojection_error(P_mark, K_R, RT_R, uv_R)
+        reproj_errors_L.append(np.linalg.norm(error_L))
+        reproj_errors_R.append(np.linalg.norm(error_R))
 
         if mark_type == 'mark_x':
             P_mark = mark_x_to_mark_o(P_mark, C_ball)
 
         marks_3D.append(P_mark)
     
-    return np.array(marks_3D)
+    print(f"✅ [相機與標記相對位置圖] 已輸出至：{output_dir}")
+    return np.array(marks_3D), reproj_errors_L, reproj_errors_R
 
 if __name__ == "__main__":
 

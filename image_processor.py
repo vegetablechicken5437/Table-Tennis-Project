@@ -127,22 +127,22 @@ def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path
             cv2.LINE_AA
         )
 
-        # 🟨 畫黃色方框
-        box_margin_x = int(display_width * ignore_rate)
-        box_margin_y = int(display_height * ignore_rate)
-        box_width = display_width - 2 * box_margin_x
-        box_height = display_height - 2 * box_margin_y
+        # # 🟨 畫黃色方框
+        # box_margin_x = int(display_width * ignore_rate)
+        # box_margin_y = int(display_height * ignore_rate)
+        # box_width = display_width - 2 * box_margin_x
+        # box_height = display_height - 2 * box_margin_y
 
-        # 左畫面
-        top_left_L = (box_margin_x, box_margin_y)
-        bottom_right_L = (box_margin_x + box_width, box_margin_y + box_height)
-        cv2.rectangle(combined_img, top_left_L, bottom_right_L, (0, 255, 255), 2)
+        # # 左畫面
+        # top_left_L = (box_margin_x, box_margin_y)
+        # bottom_right_L = (box_margin_x + box_width, box_margin_y + box_height)
+        # cv2.rectangle(combined_img, top_left_L, bottom_right_L, (0, 255, 255), 2)
 
-        # 右畫面
-        offset = display_width
-        top_left_R = (offset + box_margin_x, box_margin_y)
-        bottom_right_R = (offset + box_margin_x + box_width, box_margin_y + box_height)
-        cv2.rectangle(combined_img, top_left_R, bottom_right_R, (0, 255, 255), 2)
+        # # 右畫面
+        # offset = display_width
+        # top_left_R = (offset + box_margin_x, box_margin_y)
+        # bottom_right_R = (offset + box_margin_x + box_width, box_margin_y + box_height)
+        # cv2.rectangle(combined_img, top_left_R, bottom_right_R, (0, 255, 255), 2)
 
         # 小圖：左上角與右上角
         small_L_path = os.path.join(mark_poly_img_path, name_L)
@@ -164,33 +164,33 @@ def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path
         combined_img[0:small_img_size[1], 0:small_img_size[0]] = small_L
         combined_img[0:small_img_size[1], -small_img_size[0]:] = small_R
 
-        # 🔲 小圖畫黃色方框
-        margin_x_s = small_img_size[0] // 10
-        margin_y_s = small_img_size[1] // 10
-        box_w_s = small_img_size[0] - 2 * margin_x_s
-        box_h_s = small_img_size[1] - 2 * margin_y_s
+        # # 🔲 小圖畫黃色方框
+        # margin_x_s = small_img_size[0] // 10
+        # margin_y_s = small_img_size[1] // 10
+        # box_w_s = small_img_size[0] - 2 * margin_x_s
+        # box_h_s = small_img_size[1] - 2 * margin_y_s
 
-        # 左上角小圖框（左上為(0,0)）
-        top_left_s_L = (margin_x_s, margin_y_s)
-        bottom_right_s_L = (margin_x_s + box_w_s, margin_y_s + box_h_s)
-        cv2.rectangle(
-            combined_img,
-            top_left_s_L,
-            bottom_right_s_L,
-            (0, 255, 255),
-            2
-        )
+        # # 左上角小圖框（左上為(0,0)）
+        # top_left_s_L = (margin_x_s, margin_y_s)
+        # bottom_right_s_L = (margin_x_s + box_w_s, margin_y_s + box_h_s)
+        # cv2.rectangle(
+        #     combined_img,
+        #     top_left_s_L,
+        #     bottom_right_s_L,
+        #     (0, 255, 255),
+        #     2
+        # )
 
-        # 右上角小圖框（從右上 corner 開始算）
-        top_left_s_R = (video_width - small_img_size[0] + margin_x_s, margin_y_s)
-        bottom_right_s_R = (video_width - small_img_size[0] + margin_x_s + box_w_s, margin_y_s + box_h_s)
-        cv2.rectangle(
-            combined_img,
-            top_left_s_R,
-            bottom_right_s_R,
-            (0, 255, 255),
-            2
-        )
+        # # 右上角小圖框（從右上 corner 開始算）
+        # top_left_s_R = (video_width - small_img_size[0] + margin_x_s, margin_y_s)
+        # bottom_right_s_R = (video_width - small_img_size[0] + margin_x_s + box_w_s, margin_y_s + box_h_s)
+        # cv2.rectangle(
+        #     combined_img,
+        #     top_left_s_R,
+        #     bottom_right_s_R,
+        #     (0, 255, 255),
+        #     2
+        # )
 
         # # 🔁 計算縮放比例
         # scale_x = display_width / frame_width  # 720 / 1440 = 0.5
@@ -247,12 +247,57 @@ if __name__ == "__main__":
     #     enhanced = enhance_image(img, 2, 30)
     #     cv2.imwrite(f"{output_folder_path}/{i}.jpg", enhanced)
 
-    # image_folder_path = 'samples'
-    # output_video_path = 'demo_video.mp4'
+    # image_folder_path = r"C:\Users\jason\Desktop\TableTennisProject\ProcessedImages\0412\20250412_152611\enhanced_R"
+    # output_video_path = 'demo_video_R.mp4'
     # createVideo(image_folder_path, output_video_path, fps=30)
 
     generate_verify_video(
-        ball_bbox_label_path=r"C:\Users\jason\Desktop\TableTennisProject\BallDetection_YOLOv5\yolov5\runs\detect\0412\exp_20250412_152132",
-        mark_poly_label_path=r"C:\Users\jason\Desktop\TableTennisProject\LogoDetection_YOLOv8\runs\segment\predict\0412\20250412_152132",
+        ball_bbox_label_path=r"C:\Users\jason\Desktop\TableTennisProject\BallDetection_YOLOv5\yolov5\runs\detect\0412\exp_20250412_152611",
+        mark_poly_label_path=r"C:\Users\jason\Desktop\TableTennisProject\LogoDetection_YOLOv8\runs\segment\predict\0412\20250412_152611",
         output_path='output_video.mp4'
     )
+
+    # # === 設定影片路徑 ===
+    # input_video_path = 'demo_video_R.mp4'    # 輸入影片路徑
+    # output_mask_path = 'output_mask_R.mp4'  # 輸出遮罩影片
+
+    # # === 建立背景相減器 ===
+    # backSub = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16, detectShadows=False)
+
+    # # === 開啟影片檔案 ===
+    # cap = cv2.VideoCapture(input_video_path)
+    # if not cap.isOpened():
+    #     print("❌ 無法開啟影片")
+    #     exit()
+
+    # # === 擷取影片資訊（幀率與大小） ===
+    # fps = cap.get(cv2.CAP_PROP_FPS)
+    # width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    # height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # # === 建立影片寫入器 ===
+    # fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    # out = cv2.VideoWriter(output_mask_path, fourcc, fps, (width, height), isColor=False)
+
+    # # === 逐幀處理 ===
+    # while True:
+    #     ret, frame = cap.read()
+    #     if not ret:
+    #         break
+
+    #     # 前景遮罩擷取
+    #     fgMask = backSub.apply(frame)
+
+    #     # 寫入黑白遮罩畫面
+    #     out.write(fgMask)
+
+    #     # 可視化（開發時可用）
+    #     # cv2.imshow('Mask', fgMask)
+    #     # if cv2.waitKey(1) & 0xFF == ord('q'):
+    #     #     break
+
+    # # === 清理資源 ===
+    # cap.release()
+    # out.release()
+    # cv2.destroyAllWindows()
+    # print("✅ 處理完成，遮罩影片已輸出到:", output_mask_path)

@@ -86,6 +86,7 @@ class CornerPicker:
         cv2.imwrite(os.path.join(self.output_folder, "marked_left.jpg"), img_L_copy)
         cv2.imwrite(os.path.join(self.output_folder, "marked_right.jpg"), img_R_copy)
         self.root.quit()
+        self.root.destroy()
 
     def update_images(self):
         img_L_copy = self.img_left_resized.copy()
@@ -128,5 +129,5 @@ class CornerPicker:
         self.root.mainloop()
 
 if __name__ == "__main__":
-    picker = CornerPicker([], "OUTPUT")
-    picker.pick_corners('Images_LR/sample-1x_LR_enhanced')
+    picker = CornerPicker([], ".")
+    picker.pick_corners('ProcessedImages/0412/20250412_152611/enhanced_LR')

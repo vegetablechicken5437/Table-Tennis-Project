@@ -1,5 +1,8 @@
 import numpy as np
 from scipy.stats import gaussian_kde
+from scipy.optimize import minimize
+from scipy.integrate import solve_ivp
+import matplotlib.pyplot as plt
 
 def find_best_rps(rps_list):
     if len(rps_list) == 1:
@@ -22,20 +25,23 @@ def calc_candidate_spin_rates(traj_3D, marks_3D, plane_normal, fps=225):
     - rps_cw_extra_list: 順時針 +360° 的 RPS
     - rps_ccw_list: 正確為逆時針的 RPS
     - rps_ccw_extra_list: 逆時針 +360° 的 RPS
+    - valid_data: (i, v1, v2, theta_deg) 連續偵測到標記的 frame 資訊
     """
 
     delta_t = 1 / fps
-    translated_logos = marks_3D - traj_3D
-    projected_logos = translated_logos - np.outer(np.dot(translated_logos, plane_normal), plane_normal)
+    translated_marks = marks_3D - traj_3D
+    projected_marks = translated_marks - np.outer(np.dot(translated_marks, plane_normal), plane_normal)
 
     rps_cw_list = []
     rps_cw_extra_list = []
     rps_ccw_list = []
     rps_ccw_extra_list = []
 
-    for i in range(len(projected_logos) - 1):
-        v1 = projected_logos[i]
-        v2 = projected_logos[i + 1]
+    valid_data = []
+
+    for i in range(len(projected_marks) - 1):
+        v1 = projected_marks[i]
+        v2 = projected_marks[i + 1]
 
         if np.any(np.isnan(v1)) or np.any(np.isnan(v2)):
             continue
@@ -47,31 +53,26 @@ def calc_candidate_spin_rates(traj_3D, marks_3D, plane_normal, fps=225):
 
         cos_theta = np.clip(np.dot(v1, v2) / (norm_v1 * norm_v2), -1.0, 1.0)
         theta = np.arccos(cos_theta)
-        theta = theta * 360 / (2 * np.pi)
+        theta_deg = theta * 360 / (2 * np.pi)
 
-        # 判斷方向
         cross = np.cross(v1, v2)
         direction = np.dot(cross, plane_normal)
 
-        # 根據方向切換夾角定義
-        if direction < 0:  # 順時針
-            theta_cw = theta
-            theta_ccw = 360 - theta
-        else:  # 逆時針或無方向（也當逆）
-            theta_ccw = theta
-            theta_cw = 360 - theta
+        if direction < 0:
+            theta_cw = theta_deg
+            theta_ccw = 360 - theta_deg
+        else:
+            theta_ccw = theta_deg
+            theta_cw = 360 - theta_deg
 
-        # print('theta: ', theta)
-        # print('theta_cw: ', theta_cw)
-        # print('theta_ccw: ', theta_ccw)
-
-        # 計算 RPS
-        rps_cw_list.append(round((theta_cw / 360) / delta_t, 4))        # 角度除360表示幾圈
+        rps_cw_list.append(round((theta_cw / 360) / delta_t, 4))
         rps_cw_extra_list.append(round(((theta_cw + 360) / 360) / delta_t, 4))
         rps_ccw_list.append(round((theta_ccw / 360) / delta_t, 4))
         rps_ccw_extra_list.append(round(((theta_ccw + 360) / 360) / delta_t, 4))
 
-    return rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list
+        valid_data.append((i, v1, v2, theta_deg))
+    
+    return (rps_cw_list, rps_cw_extra_list, rps_ccw_list, rps_ccw_extra_list), valid_data
 
 
 def trimmed_mean_rps(candidates, trim_frac=0.1):
@@ -82,10 +83,17 @@ def trimmed_mean_rps(candidates, trim_frac=0.1):
         arr = arr[k:-k]
     return np.nanmean(arr)
 
-def compute_trajectory_aero(v_init, x_init, rps, dt, num_steps, plane_normal, aero_params):
+def compute_trajectory_aero(traj_3D_ori, dt, fps, aero_params, rps, spin_axis):
     """
     使用空氣動力學公式計算桌球的軌跡，考慮空氣阻力與馬格努斯力。
     """
+    # 計算每一幀的速度 (Ground Truth)
+    velocity_gt = np.diff(traj_3D_ori, axis=0) * fps    # 速度計算
+    acceleration_gt = np.diff(velocity_gt, axis=0) * fps    # 加速度計算
+    num_steps = len(traj_3D_ori)    # 設定模擬步數
+
+    v_init, x_init = velocity_gt[0], traj_3D_ori[0]
+
     g, m, rho, A, r, Cd, Cm = aero_params.values()
 
     pos = np.zeros((num_steps, 3))
@@ -96,6 +104,7 @@ def compute_trajectory_aero(v_init, x_init, rps, dt, num_steps, plane_normal, ae
 
         v_mag = np.linalg.norm(vel)
         if v_mag < 1e-6:
+            print(v_mag)
             continue
 
         # 計算空氣阻力 (Drag Force)
@@ -103,7 +112,7 @@ def compute_trajectory_aero(v_init, x_init, rps, dt, num_steps, plane_normal, ae
 
         # 計算馬格努斯力 (Magnus Force)
         omega = rps * 2 * np.pi     # 轉速（RPS）轉換為角速度 ω (rad/s)
-        omega_vec = omega * plane_normal
+        omega_vec = omega * spin_axis
         Fm = Cm * rho * A * r * np.cross(omega_vec, vel)
         
         if np.isnan(Fm).any() or np.isinf(Fm).any():
@@ -118,6 +127,99 @@ def compute_trajectory_aero(v_init, x_init, rps, dt, num_steps, plane_normal, ae
         pos[i] = pos[i - 1] + vel * dt
 
     return pos[:-1]
+
+def compute_trajectory_continuous(traj_3D_ori, dt, fps, aero_params, rps, spin_axis):
+    g, m, rho, A, r, Cd, Cm = aero_params.values()
+
+    v_init = (traj_3D_ori[1] - traj_3D_ori[0]) * fps
+    x_init = traj_3D_ori[0]
+    omega = rps * 2 * np.pi
+    omega_vec = omega * spin_axis
+
+    def dynamics(t, y):
+        pos = y[:3]
+        vel = y[3:]
+
+        v_mag = np.linalg.norm(vel)
+        if v_mag < 1e-6:
+            return np.concatenate((vel, np.zeros(3)))
+
+        Fd = -0.5 * Cd * rho * A * v_mag * vel
+        Fm = Cm * rho * A * r * np.cross(omega_vec, vel)
+        Fg = np.array([0, 0, -m * g])
+
+        acc = (Fd + Fm + Fg) / m
+        return np.concatenate((vel, acc))
+
+    # 設定總模擬時間
+    total_time = dt * (len(traj_3D_ori) - 1)
+    t_span = (0, total_time)
+    y0 = np.concatenate((x_init, v_init))
+
+    t_eval = np.linspace(0, total_time, len(traj_3D_ori))  # 對齊原始軌跡幀數
+    sol = solve_ivp(dynamics, t_span, y0, t_eval=t_eval, method='RK45')
+
+    return sol.y[:3].T  # 回傳位置 (N, 3)
+
+def optimize_spin_parameters(traj_3D_ori, dt, fps, aero_params,
+                             rps_init=None, spin_axis_init=None, rps_delta=20):
+    """
+    根據初始 rps 和可接受變動範圍，優化旋轉軸與旋轉速度，使模擬軌跡最貼近真實軌跡。
+
+    Parameters:
+        traj_3D_ori: (N, 3) array 真實軌跡
+        rps_init: float 初始旋轉速度（rps）
+        dt: float 每幀間隔時間（1/fps）
+        fps: int 每秒幾幀
+        aero_params: dict 物理參數（g, m, rho, A, r, Cd, Cm）
+        spin_axis_init: array-like 初始旋轉軸方向（可選），預設為 z 軸
+        rps_delta: float rps 的調整範圍（會優化區間為 rps_init ± delta）
+
+    Returns:
+        best_spin_axis: ndarray 單位旋轉軸
+        best_rps: float 最佳 rps
+        min_error: float 最小平均距離誤差
+    """
+
+    if spin_axis_init is None:
+        spin_axis_init = np.array([0, 0, 1])
+
+    def loss_fn(params):
+        theta, phi, rps = params
+        spin_axis = np.array([
+            np.sin(theta) * np.cos(phi),
+            np.sin(theta) * np.sin(phi),
+            np.cos(theta)
+        ])
+        # sim_traj = compute_trajectory_aero(traj_3D_ori, dt, fps, aero_params, rps, spin_axis)
+        sim_traj = compute_trajectory_continuous(traj_3D_ori, dt, fps, aero_params, rps, spin_axis)
+        if np.any(np.isnan(sim_traj)):
+            return np.inf
+        error = np.mean(np.linalg.norm(sim_traj - traj_3D_ori[:len(sim_traj)], axis=1))
+        return error
+
+    # 將 spin_axis_init 轉為 theta/phi 角度
+    x, y, z = spin_axis_init
+    theta0 = np.arccos(z / np.linalg.norm(spin_axis_init))
+    phi0 = np.arctan2(y, x)
+    init = [theta0, phi0, rps_init]
+
+    bounds = [
+        (0, np.pi),                # θ: 0 ~ π
+        (0, 2 * np.pi),            # φ: 0 ~ 2π
+        (rps_init - rps_delta, rps_init + rps_delta)  # rps 微調範圍
+    ]
+
+    res = minimize(loss_fn, init, bounds=bounds, method='L-BFGS-B')
+
+    theta_opt, phi_opt, rps_opt = res.x
+    spin_axis_opt = np.array([
+        np.sin(theta_opt) * np.cos(phi_opt),
+        np.sin(theta_opt) * np.sin(phi_opt),
+        np.cos(theta_opt)
+    ])
+    return spin_axis_opt, rps_opt, res.fun
+
 
 def compute_angular_velocity_rps(t, px, py, pz, aero_params):
 

@@ -1,12 +1,12 @@
 import numpy as np
 
-# def fit_offset_plane(offsets, r=20, thres=0.8):
-
-#     offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]     # 過濾 np.nan
+# def fit_offset_plane(offsets, angle_thres=45):  # angle_thres in degrees
+#     offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]  # 過濾 np.nan
 
 #     if len(offsets_clean) < 3:
 #         print("❗需要至少三個有效點才能擬合平面")
-#         return np.array([np.nan, np.nan, np.nan]), offsets
+#         plane = {'normal': np.array([np.nan, np.nan, np.nan]), 'x_axis': None, 'y_axis': None}
+#         return plane, offsets
 
 #     # 擬合平面
 #     centroid = offsets_clean.mean(axis=0)
@@ -14,57 +14,78 @@ import numpy as np
 #     normal = vh[-1]
 #     x_axis = vh[0]
 #     y_axis = vh[1]
-#     plane = {'normal':normal, 'x_axis':x_axis, 'y_axis':y_axis}
+#     plane = {'normal': normal, 'x_axis': x_axis, 'y_axis': y_axis}
 
 #     filtered_offsets = []
 #     for o in offsets:
-#         if o[0] == np.nan:
+#         if np.isnan(o).any():
 #             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
 #             continue
-#         vec = np.array(o) - centroid
-#         proj_x = np.dot(vec, x_axis)
-#         proj_y = np.dot(vec, y_axis)
-#         proj_len = np.sqrt(proj_x**2 + proj_y**2)
-#         if proj_len < r * thres:
-#             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
+
+#         cos_theta = np.clip(np.dot(o, normal) / (np.linalg.norm(o) * np.linalg.norm(normal)), -1.0, 1.0)
+#         theta = np.arccos(cos_theta)
+#         theta = theta * 360 / (2 * np.pi)
+
+#         if theta > angle_thres and theta < 180 - angle_thres:
+#             filtered_offsets.append(o)
 #         else:
-#             filtered_offsets.append(np.array(o))
+#             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
 
 #     return plane, filtered_offsets
 
 import numpy as np
 
-def fit_offset_plane(offsets, angle_thres=45):  # angle_thres in degrees
-    offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]  # 過濾 np.nan
-
+def ransac_fit_plane(offsets, iterations=100, threshold=0.1):
+    offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]
     if len(offsets_clean) < 3:
-        print("❗需要至少三個有效點才能擬合平面")
-        return np.array([np.nan, np.nan, np.nan]), offsets
+        return {'normal': np.array([np.nan]*3), 'x_axis': None, 'y_axis': None}, offsets
 
-    # 擬合平面
-    centroid = offsets_clean.mean(axis=0)
-    u, s, vh = np.linalg.svd(offsets_clean - centroid)
+    best_inliers = []
+    best_normal = None
+
+    for _ in range(iterations):
+        # 隨機取 3 點
+        sample = offsets_clean[np.random.choice(len(offsets_clean), 3, replace=False)]
+        v1 = sample[1] - sample[0]
+        v2 = sample[2] - sample[0]
+        normal = np.cross(v1, v2)
+        if np.linalg.norm(normal) == 0:
+            continue
+        normal = normal / np.linalg.norm(normal)
+        d = -np.dot(normal, sample[0])
+
+        # 計算所有點到平面距離
+        distances = np.abs(offsets_clean @ normal + d)
+
+        # 找內點
+        inliers = offsets_clean[distances < threshold]
+        if len(inliers) > len(best_inliers):
+            best_inliers = inliers
+            best_normal = normal
+
+    if len(best_inliers) < 3:
+        return {'normal': np.array([np.nan]*3), 'x_axis': None, 'y_axis': None}, offsets
+
+    # 對內點做 SVD 擬合平面
+    centroid = best_inliers.mean(axis=0)
+    u, s, vh = np.linalg.svd(best_inliers - centroid)
     normal = vh[-1]
     x_axis = vh[0]
     y_axis = vh[1]
     plane = {'normal': normal, 'x_axis': x_axis, 'y_axis': y_axis}
 
+    # 標記 filtered_offsets（不是內點就設為 nan）
     filtered_offsets = []
     for o in offsets:
         if np.isnan(o).any():
-            filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
-            continue
-
-        cos_theta = np.clip(np.dot(o, normal) / (np.linalg.norm(o) * np.linalg.norm(normal)), -1.0, 1.0)
-        theta = np.arccos(cos_theta)
-        theta = theta * 360 / (2 * np.pi)
-
-        if theta > angle_thres and theta < 180 - angle_thres:
+            filtered_offsets.append(np.array([np.nan]*3))
+        elif np.any(np.all(np.isclose(o, best_inliers, atol=1e-6), axis=1)):
             filtered_offsets.append(o)
         else:
-            filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
+            filtered_offsets.append(np.array([np.nan]*3))
 
     return plane, filtered_offsets
+
 
 
 def compute_spin_axis_directions(px_list, py_list, pz_list, aero_params, dt, original_trajs):
