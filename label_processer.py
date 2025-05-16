@@ -3,6 +3,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
+import json
 
 # 讀取 polygon 格式 ===
 def read_poly_labels(label_path):
@@ -206,7 +207,7 @@ def bbox_loc_constraint(label_data_pixel_coords, image_width=1440, image_height=
     return filtered_label_data_pixel_coords
 
 # 裁切並儲存所有 bbox
-def crop_bbox(img_folder, ball_bbox_label_path, output_folder, 
+def crop_bbox(img_folder, ball_bbox_label_path, output_folder, bbox_xyxy_path=None,
               image_width=1440, image_height=1080, scale=2, bbox_width=128, bbox_height=128):
     """
     all_bbox_xyxy = {
@@ -254,6 +255,10 @@ def crop_bbox(img_folder, ball_bbox_label_path, output_folder,
         cv2.imwrite(output_path, cropped_ball)
 
     print(f"已裁切 {img_folder} 所有 bbox 至 {output_folder}")
+    with open(bbox_xyxy_path, "w") as fp:
+        json.dump(all_bbox_xyxy, fp)  
+    print(f"已儲存 {bbox_xyxy_path}")
+
     return all_bbox_xyxy
 
 def map_point_back_to_ori_image(point_in_crop, bbox_xyxy, bbox_width=128, bbox_height=128):

@@ -14,15 +14,15 @@ from visualize_functions import *
 
 PROCESS_IMAGE = True
 TRAIN = {'Ball':False, 'Logo':False}
-INFERENCE = {'Ball':True, 'Logo':True}
+INFERENCE = {'Ball':False, 'Logo':True}
 CROP_BBOX = True
-PICK_CORNERS = True
+PICK_CORNERS = False
 GEN_VERIFY_VIDEO = True
 CALCULATE_3D = True
 CALCULATE_SPIN_RATE = True
 
 all_sample_folder_name = '0412'
-sample_folder_name = '20250412_171210'
+sample_folder_name = '20250412_152132'
 
 ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
@@ -47,8 +47,11 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     # Step 1 & 2: 分割影像(原始影像為左右合併)
     # ----------------------------------------------------------------
+    save_processed_image = False
     processed_folder_path = os.path.join(processed_img_folder_path, 'enhanced_LR')
     os.makedirs(processed_folder_path, exist_ok=True)
+
+    all_imgL, all_imgR = [], []
 
     if PROCESS_IMAGE:
         print('🚀 增強與分割所有影像 ...')
@@ -59,8 +62,12 @@ if __name__ == '__main__':
             enhanced = enhance_image(img, 2, 30)
             imgL, imgR = split_image(enhanced)
 
-            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
-            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+            all_imgL.append(imgL)
+            all_imgR.append(imgR)
+
+            if save_processed_image:
+                cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
+                cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
 
     # ----------------------------------------------------------------
     # Step 7: # 透過UI介面手動選取球桌四角，定義世界坐標系
@@ -74,33 +81,44 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     # Step 3: YOLO偵測桌球(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
-    ball_yolo_folder = 'BallDetection_YOLOv5/yolov5'
-    ball_detection_yolov5(ball_yolo_folder, ball_yolo_params, processed_folder_path, 
-                          all_sample_folder_name, sample_folder_name, 
-                          TRAIN, INFERENCE)
+    ball_yolo_folder = 'BallDetection_YOLOv11'
+    if INFERENCE['Ball']:
+        ball_detection_yolov11_inferencing(
+                                            ball_yolo_folder=ball_yolo_folder, 
+                                            ball_yolo_params=ball_yolo_params, 
+                                            input_folder=processed_folder_path, 
+                                            all_sample_folder_name=all_sample_folder_name, 
+                                            sample_folder_name=sample_folder_name
+                                           )
     # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # Step 4: 裁切bounding box 並輸出裁切圖片
     # ----------------------------------------------------------------
-    ball_bbox_label_path = f'{ball_yolo_folder}/runs/detect/{all_sample_folder_name}/exp_{sample_folder_name}/labels'    # 偵測結果資料夾(含多條軌跡的偵測結果)
+    ball_bbox_label_path = f'{ball_yolo_folder}/runs/detect/predict/{all_sample_folder_name}/{sample_folder_name}/labels'    # 偵測結果資料夾(含多條軌跡的偵測結果)
     cropped_balls_folder = os.path.join('Cropped_Balls', all_sample_folder_name, sample_folder_name)
     os.makedirs(cropped_balls_folder, exist_ok=True)
     
     if CROP_BBOX:
-        all_bbox_xyxy = crop_bbox(processed_folder_path, ball_bbox_label_path, cropped_balls_folder)
-        with open(f"{output_sample_folder_path}/all_bbox_xyxy.json", "w") as fp:
-            json.dump(all_bbox_xyxy, fp)  
-        print(f"已儲存 {output_sample_folder_path}/all_bbox_xyxy.json")
+        all_bbox_xyxy = crop_bbox(
+                                    img_folder=processed_folder_path, 
+                                    ball_bbox_label_path=ball_bbox_label_path, 
+                                    output_folder=cropped_balls_folder,
+                                    bbox_xyxy_path=f"{output_sample_folder_path}/all_bbox_xyxy.json"
+                                  )
 
     # ----------------------------------------------------------------
     # Step 5: YOLO偵測Logo(可選擇是否訓練和預測)
     # ----------------------------------------------------------------
-    mark_yolo_folder = 'LogoDetection_YOLOv8'
-    logo_detection_yolov8(mark_yolo_folder, mark_yolo_params, cropped_balls_folder, 
-                          all_sample_folder_name, sample_folder_name, 
-                          TRAIN, INFERENCE)
-
+    mark_yolo_folder = 'MarkDetection_YOLOv11'
+    if INFERENCE['Logo']:
+        mark_detection_yolov11_inferencing(
+                                            mark_yolo_folder=mark_yolo_folder, 
+                                            mark_yolo_params=mark_yolo_params, 
+                                            input_folder=cropped_balls_folder, 
+                                            all_sample_folder_name=all_sample_folder_name, 
+                                            sample_folder_name=sample_folder_name
+                                           )
     # ----------------------------------------------------------------
     # Step 6: 輸出球和logo在影像上的座標(每個frame都有左、右影像的球座標)
     # ----------------------------------------------------------------
@@ -167,11 +185,7 @@ if __name__ == '__main__':
                                                  output_html=f'{output_sample_folder_path}/traj_ori.html')
 
         
-
         # 移除軌跡異常點 平滑軌跡 標記點隨平滑後的軌跡平移
-        # cleaned_traj = remove_velocity_outliers(traj_3D_transformed)   
-        # cleaned_traj = remove_outliers_by_speed(traj_3D_transformed, dt, speed_ratio_thres=2.5)
-        # cleaned_traj = remove_outliers_pca(traj_3D_transformed, n_components=3, threshold=10)
         cleaned_traj, outlier_idx = remove_outliers_by_knn_distance(traj_3D_transformed, k=5, sigma_thres=3.0)
 
         # 找出包含軌跡的 frame 和 start_idx, end_idx 從頭尾檢查非空值
@@ -186,9 +200,9 @@ if __name__ == '__main__':
 
         # 切分後每段軌跡分開平滑
         for i in range(len(traj_3D_segs)):
-            smoothed_traj = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=2, extend_points=10, dt=dt)
-            marks_3D_segs[i] = shift_marks_by_trajectory(traj_3D_segs[i], smoothed_traj, marks_3D_segs[i])
-            traj_3D_segs[i] = smoothed_traj
+            smoothed_traj_seg = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=2, extend_points=10, dt=dt)
+            marks_3D_segs[i] = shift_marks_by_trajectory(traj_3D_segs[i], smoothed_traj_seg, marks_3D_segs[i])
+            traj_3D_segs[i] = smoothed_traj_seg
             np.savetxt(f'{output_sample_folder_path}/smoothed_traj{i+1}.txt', traj_3D_segs[i])
 
         # # 輸出每段軌跡和標記(以不同顏色區分)
@@ -258,9 +272,13 @@ if __name__ == '__main__':
 
                 if valid_mark_frames == []:     # 如果沒有任何連續的frame 偵測到標記
                     continue
+                
+                marks_count = np.sum(~np.isnan(marks_3D_segs[i]).all(axis=1))
+                traj_count = np.sum(~np.isnan(traj_3D_segs[i]).all(axis=1))
+                mark_detect_rate = round(marks_count / traj_count, 2)
 
                 plot_projected_marks_on_plane_all_frame(valid_mark_frames, spin_axis, 
-                                                            save_html=f"{output_sample_folder_path}/spin_animation_{i+1}.html")
+                                                        save_html=f"{output_sample_folder_path}/spin_animation_{i+1}.html")
 
                 traj_3D_segs[i] /= 1000    # mm轉為公尺
 
@@ -276,15 +294,15 @@ if __name__ == '__main__':
                     results.append([candidate_rounds[j], spin_axis, best_rps, candidate_traj])
 
                 f.write(f"\n===== Trajectory Segment {i+1} ====\n")
+                f.write(f"Mark detection successful rate: {mark_detect_rate}\n")
+                f.write(f"Valid mark frame count: {len(valid_mark_frames)}\n")
                 for j in range(len(results)):
                     candidate_round, spin_axis, best_rps, candidate_traj = results[j]
 
                     f.write(f"Candidate_{candidate_round}: \n")
                     f.write(f"Spin Axis: {list(map(lambda x: round(x, 4), spin_axis))}\n")
                     f.write(f"Spin Rate: {round(best_rps, 4)} RPS\n")
-                    # f.write(f"Trajectory Error: {round(error, 4)} (Meters in Average)\n")
                     f.write("===================================\n")
-
                 
                 plot_candidate_trajectories(traj_3D_segs[i], candidate_trajectories, spin_axis, corners_3D_transformed_meter,
                                             f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html")

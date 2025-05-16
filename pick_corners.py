@@ -129,5 +129,6 @@ class CornerPicker:
         self.root.mainloop()
 
 if __name__ == "__main__":
-    picker = CornerPicker([], ".")
-    picker.pick_corners('ProcessedImages/0412/20250412_152611/enhanced_LR')
+    # picker = CornerPicker([], ".")
+    # picker.pick_corners(imgL, imgR)
+    pass

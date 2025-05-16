@@ -75,14 +75,14 @@ def createVideo(image_folder_path, output_video_path, fps=30):
     # 釋放影片寫入器
     video.release()
 
-def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path, output_path, fps=30, total_frames=500):
-    frame_width, frame_height = 1440, 1080
+def generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path, output_path, 
+                          fps=30, total_frames=500, frame_width=1440, frame_height=1080, ignore_rate=0.05):
+    
     display_width, display_height = frame_width // 2, frame_height // 2  # 720x540
     video_width = display_width * 2  # 1440
     video_height = display_height  # 540
     small_img_size = (frame_width // 10, frame_width // 10)  # 144x144
-    ignore_rate = 0.05
-
+    
     lb, rb, lmo, rmo, lmx, rmx = extract_centers(all_2D_centers, total_frames=total_frames)
 
     # 初始化 VideoWriter

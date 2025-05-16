@@ -1,11 +1,13 @@
 __pycache__/
+ball_label_samples/
 BallDetection_YOLOv5/
+BallDetection_YOLOv11/
 CameraCalibration/
 CameraControl/
 Cropped_Balls/
 Images/
 Images_LR/
-LogoDetection_YOLOv8/
+MarkDetection_YOLOv11/
 OldFiles/
 OtherFunctions/
 OUTPUT/
