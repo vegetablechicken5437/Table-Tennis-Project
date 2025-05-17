@@ -268,7 +268,8 @@ def map_point_back_to_ori_image(point_in_crop, bbox_xyxy, bbox_width=128, bbox_h
     y_in_ori = y1 + point_in_crop[1] * (bbox_height_ori/bbox_height)
     return (int(x_in_ori), int(y_in_ori))
 
-def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_height=128):
+def extract_2D_points(mark_poly_label_path, bbox_xyxy_path=None, 
+                      bbox_width=128, bbox_height=128):
     """
     all_2D_centers = {
                         "image-0000_L.txt": {0: (ball_center_x, ball_center_y), 
@@ -280,6 +281,9 @@ def extract_2D_points(mark_poly_label_path, all_bbox_xyxy, bbox_width=128, bbox_
                         ...
                      }
     """
+    with open(bbox_xyxy_path, "r") as fp:
+        all_bbox_xyxy = json.load(fp)  
+
     all_2D_centers = {}
     mark_label_files = os.listdir(mark_poly_label_path)
     print('🚀 輸出左右影像的2D點(球和標記) ...')

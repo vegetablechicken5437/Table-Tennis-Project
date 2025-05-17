@@ -39,6 +39,11 @@ def ransac_fit_plane(offsets, iterations=100, threshold=0.1):
     offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]
     if len(offsets_clean) < 3:
         return {'normal': np.array([np.nan]*3), 'x_axis': None, 'y_axis': None}, offsets
+    
+    # # 篩除 nan 及加入對面點
+    # offsets_opposite = -offsets_clean
+    # offsets_extended = np.vstack((offsets_clean, offsets_opposite))
+    # offsets_clean = offsets_extended
 
     best_inliers = []
     best_normal = None
