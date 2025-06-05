@@ -11,7 +11,7 @@ from spin_axis_calculation_new import *
 from spin_rate_calculation_new import *
 from visualize_functions import *
 
-PROCESS_IMAGE = False
+PROCESS_IMAGE = True
 
 TRAIN_BALL_DETECT_MODEL = False
 TRAIN_MARK_DETECT_MODEL = False
@@ -19,14 +19,14 @@ INFERENCE_BALL = True
 INFERENCE_MARK = True
 
 CROP_BBOX = True
-PICK_CORNERS = False
+PICK_CORNERS = True
 GEN_VERIFY_VIDEO = True
 
 CALCULATE_3D = True
 CALCULATE_SPIN_RATE = True
 
-all_sample_folder_name = '0412'
-sample_folder_name = '20250412_152822'
+all_sample_folder_name = '0527'
+sample_folder_name = '20250527_215347'
 
 ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
 processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
@@ -183,6 +183,10 @@ if __name__ == '__main__':
         # 偵測碰撞點 並根據碰撞點切分軌跡和標記
         temp_smoothed_traj = kalman_smooth_with_interp(cleaned_traj, smooth_strength=2, extend_points=10, dt=dt)     # 暫時平滑軌跡 有助找出碰傳idx
         collisions = detect_table_tennis_collisions(temp_smoothed_traj, corners_3D_transformed, z_tolerance=500)
+
+        # print(collisions)
+        # collisions[0] = (100, temp_smoothed_traj[100])
+
         traj_3D_segs = split_trajectory_by_collisions(cleaned_traj, collisions)
         marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
 
@@ -197,25 +201,6 @@ if __name__ == '__main__':
     # 計算旋轉速度
     # ----------------------------------------------------------------
     if CALCULATE_SPIN_RATE:
-        
-        # =======================================
-        # 用空氣動力學計算轉速
-        # =======================================
-        # px_list, py_list, pz_list, time_segments, t_list = process_parabolics(traj_3D_segs, dt)
-
-        # rps_list, spin_axis_list = [], []
-        # for i, t in enumerate(t_list):
-        #     px, py, pz = px_list[i], py_list[i], pz_list[i]
-        #     rps, spin_axes = compute_angular_velocity_rps(t, px, py, pz, aero_params)      # 帶入拋物線計算轉速和旋轉軸
-        #     rps_list.append(rps)
-        #     spin_axis_list.append(np.mean(spin_axes, axis=0))
-
-        # plot_trajectories_with_spin_axes(px_list, py_list, pz_list, 
-        #                                  spin_axis_list, traj_3D_segs, dt, 
-        #                                  path=f"{output_sample_folder_path}/polynomial_curves.html")
-        
-        # plot_angular_velocity_curves(time_segments, rps_list, 
-        #                              path=f"{output_sample_folder_path}/rps_aero.jpg")
 
         # =======================================
         # 用標記位置計算轉速和旋轉軸
@@ -223,12 +208,13 @@ if __name__ == '__main__':
         spin_axis_list = []  
         corners_3D_transformed_meter = corners_3D_transformed / 1000
         for i in range(len(traj_3D_segs)):
-            offsets = marks_3D_segs[i] - traj_3D_segs[i]        # 計算標記相對球心的位置
 
-            # plane, filtered_offsets = fit_offset_plane_ransac(offsets, residual_thres=0.01, min_samples=0.5)     # 擬和旋轉軸
+            offsets = marks_3D_segs[i] - traj_3D_segs[i]        # 計算標記相對球心的位置
             plane, filtered_offsets = ransac_fit_plane(offsets, iterations=100, threshold=5)
+            # plane, filtered_offsets = fit_plane_with_prior(offsets, lam=500)
             spin_axis = plane['normal']
             spin_axis_list.append(spin_axis)
+            print(spin_axis)
 
             # 刪除和旋轉軸偏差過大的標記點
             for j in range(len(filtered_offsets)):
@@ -257,6 +243,8 @@ if __name__ == '__main__':
 
                 if valid_mark_frames == []:     # 如果沒有任何連續的frame 偵測到標記
                     continue
+
+                theta_degs = [frame[-1] for frame in valid_mark_frames]
                 
                 marks_count = np.sum(~np.isnan(marks_3D_segs[i]).all(axis=1))
                 traj_count = np.sum(~np.isnan(traj_3D_segs[i]).all(axis=1))
@@ -266,6 +254,11 @@ if __name__ == '__main__':
                                                         save_html=f"{output_sample_folder_path}/spin_animation_{i+1}.html")
 
                 traj_3D_segs[i] /= 1000    # mm轉為公尺
+
+                # 計算平均速度
+                displacements = np.diff(traj_3D_segs[i], axis=0)
+                distances = np.linalg.norm(displacements, axis=1)
+                v_avg = round(np.mean(distances / dt), 4)
 
                 candidate_trajectories = []
                 results = []
@@ -278,9 +271,11 @@ if __name__ == '__main__':
                     candidate_trajectories.append(candidate_traj)
                     results.append([candidate_rounds[j], spin_axis, best_rps, candidate_traj])
 
-                f.write(f"\n===== Trajectory Segment {i+1} ====\n")
+                f.write(f"\n======= Trajectory Segment {i+1} =======\n")
                 f.write(f"Mark detection successful rate: {mark_detect_rate}\n")
                 f.write(f"Valid mark frame count: {len(valid_mark_frames)}\n")
+                f.write(f"Average Speed: {v_avg} m/s\n")
+                f.write("===================================\n")
                 for j in range(len(results)):
                     candidate_round, spin_axis, best_rps, candidate_traj = results[j]
 

@@ -1,49 +1,9 @@
 import numpy as np
 
-# def fit_offset_plane(offsets, angle_thres=45):  # angle_thres in degrees
-#     offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]  # 過濾 np.nan
-
-#     if len(offsets_clean) < 3:
-#         print("❗需要至少三個有效點才能擬合平面")
-#         plane = {'normal': np.array([np.nan, np.nan, np.nan]), 'x_axis': None, 'y_axis': None}
-#         return plane, offsets
-
-#     # 擬合平面
-#     centroid = offsets_clean.mean(axis=0)
-#     u, s, vh = np.linalg.svd(offsets_clean - centroid)
-#     normal = vh[-1]
-#     x_axis = vh[0]
-#     y_axis = vh[1]
-#     plane = {'normal': normal, 'x_axis': x_axis, 'y_axis': y_axis}
-
-#     filtered_offsets = []
-#     for o in offsets:
-#         if np.isnan(o).any():
-#             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
-#             continue
-
-#         cos_theta = np.clip(np.dot(o, normal) / (np.linalg.norm(o) * np.linalg.norm(normal)), -1.0, 1.0)
-#         theta = np.arccos(cos_theta)
-#         theta = theta * 360 / (2 * np.pi)
-
-#         if theta > angle_thres and theta < 180 - angle_thres:
-#             filtered_offsets.append(o)
-#         else:
-#             filtered_offsets.append(np.array([np.nan, np.nan, np.nan]))
-
-#     return plane, filtered_offsets
-
-import numpy as np
-
 def ransac_fit_plane(offsets, iterations=100, threshold=0.1):
     offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]
     if len(offsets_clean) < 3:
         return {'normal': np.array([np.nan]*3), 'x_axis': None, 'y_axis': None}, offsets
-    
-    # # 篩除 nan 及加入對面點
-    # offsets_opposite = -offsets_clean
-    # offsets_extended = np.vstack((offsets_clean, offsets_opposite))
-    # offsets_clean = offsets_extended
 
     best_inliers = []
     best_normal = None
@@ -91,29 +51,47 @@ def ransac_fit_plane(offsets, iterations=100, threshold=0.1):
 
     return plane, filtered_offsets
 
+def fit_plane_with_prior(offsets, prior=np.array([1.0, 0.0, 0.0]), lam=10.0):
+    """
+    擬合平面，使其法向量接近 prior（預設為 x 軸），根據 offsets 微調
+    """
+    offsets_clean = offsets[~np.isnan(offsets).any(axis=1)]
+    if len(offsets_clean) < 3:
+        return {'normal': np.array([np.nan]*3), 'x_axis': None, 'y_axis': None}, offsets
 
+    # 中心化資料
+    centroid = offsets_clean.mean(axis=0)
+    X = offsets_clean - centroid
 
-def compute_spin_axis_directions(px_list, py_list, pz_list, aero_params, dt, original_trajs):
-    rps_list = []
-    g, m, rho, A, r, Cd, Cm = aero_params.values()
+    # 資料協方差矩陣
+    C = X.T @ X
 
-    for px, py, pz, traj in zip(px_list, py_list, pz_list, original_trajs):
-        t = np.arange(len(traj)) * dt
-        t0 = t[len(t) // 2]
+    # 加入先驗方向的懲罰
+    P = lam * (np.eye(3) - np.outer(prior, prior))  # 懲罰偏離 prior 的方向
+    A = C + P
 
-        v0 = np.array([px.deriv(1)(t0), py.deriv(1)(t0), pz.deriv(1)(t0)])
-        a0 = np.array([px.deriv(2)(t0), py.deriv(2)(t0), pz.deriv(2)(t0)])
-        vnorm = np.linalg.norm(v0)
-        Fd = -0.5 * Cd * rho * A * vnorm * v0
-        Fnet = m * a0 - m * g - Fd
+    # 求 A 的最小特徵值對應向量（最佳法向量）
+    eigvals, eigvecs = np.linalg.eigh(A)
+    normal = eigvecs[:, np.argmin(eigvals)]
+    normal = normal / np.linalg.norm(normal)
 
-        omega_vec = np.cross(Fnet, v0) / (vnorm ** 2)
-        omega_vec *= 3 / (4 * Cm * np.pi * r**3 * rho)
-        omega_vec = omega_vec / np.linalg.norm(omega_vec) * 0.3  # normalize and scale
+    # 建立正交基底
+    arbitrary = np.array([0, 1, 0]) if abs(normal[0]) > 0.9 else np.array([1, 0, 0])
+    x_axis = np.cross(normal, arbitrary)
+    x_axis = x_axis / np.linalg.norm(x_axis)
+    y_axis = np.cross(normal, x_axis)
 
-        rps_list.append((omega_vec, t0))  # 也可以只 append omega_vec
+    plane = {'normal': normal, 'x_axis': x_axis, 'y_axis': y_axis}
 
-    return rps_list
+    # 建立 filtered_offsets（無變化，標記有效資料）
+    filtered_offsets = []
+    for o in offsets:
+        if np.isnan(o).any():
+            filtered_offsets.append(np.array([np.nan]*3))
+        else:
+            filtered_offsets.append(o)
+
+    return plane, np.array(filtered_offsets)
 
 
 if __name__ == "__main__":

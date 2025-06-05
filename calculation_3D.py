@@ -134,17 +134,18 @@ def myDLT(camParams, left_pts, right_pts):
         else:
             u, v = left_pts[i]          # set u, v (x, y in the left image)
             up, vp = right_pts[i]       # set up, vp (x, y in the right image)
-            X = triangulation(left_camera_P, right_camera_P, u, v, up, vp)
-            points_3D.append(X)
 
-            # print(left_pts[i])
-            # print(right_pts[i])
+            X = triangulation(left_camera_P, right_camera_P, u, v, up, vp)
 
             error_L = reprojection_error(X, camParams['LeftCamK'], camParams['LeftCamRT'], (u, v))
             error_R = reprojection_error(X, camParams['RightCamK'], camParams['RightCamRT'], (up, vp))
 
-            reproj_errors_L.append(np.linalg.norm(error_L))
-            reproj_errors_R.append(np.linalg.norm(error_R))
+            if np.linalg.norm(error_L) < 10 and np.linalg.norm(error_R) < 10:
+                points_3D.append(X)
+                reproj_errors_L.append(np.linalg.norm(error_L))
+                reproj_errors_R.append(np.linalg.norm(error_R))
+            else:
+                points_3D.append([np.nan, np.nan, np.nan])
 
             # print(f"Frame {i+1}")
             # print("Reprojection Error Left: ", error_L)
