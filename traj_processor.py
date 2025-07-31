@@ -273,7 +273,10 @@ def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5, dt=
     smoothed_traj = smoothed_state_means[:, :3]
     smoothed_traj = smoothed_traj[extend_points:-extend_points]
 
-    return smoothed_traj
+    smoothed_speed = smoothed_state_means[:, 3:]  # vx, vy, vz
+    smoothed_velocity = np.linalg.norm(smoothed_speed[extend_points:-extend_points])
+
+    return smoothed_traj, smoothed_velocity
 
 
 def shift_marks_by_trajectory(original_traj, smoothed_traj, marks_3D):
@@ -323,6 +326,61 @@ def process_parabolics(traj_3D_segs, dt):
         time_segments.append(t + (time_segments[-1][-1] + dt if time_segments else 0))
         t_list.append(t)
     return px_list, py_list, pz_list, time_segments, t_list
+
+def quadratic_fit_3D(traj_3D, dt):
+    N = len(traj_3D)
+    t = np.arange(N) * dt  # 使用 dt 建立時間軸
+
+    traj_3D = fill_nan_with_neighbors(traj_3D)
+
+    # 對 x, y, z 各自做二次多項式擬合
+    coeffs_x = np.polyfit(t, traj_3D[:, 0], 2)
+    coeffs_y = np.polyfit(t, traj_3D[:, 1], 2)
+    coeffs_z = np.polyfit(t, traj_3D[:, 2], 2)
+
+    # 建立新的等間距時間點（同樣區間長度）
+    t_new = np.linspace(t[0], t[-1], N)
+
+    # 計算擬合後的座標
+    fitted_x = np.polyval(coeffs_x, t_new)
+    fitted_y = np.polyval(coeffs_y, t_new)
+    fitted_z = np.polyval(coeffs_z, t_new)
+    fitted_coords = np.stack([fitted_x, fitted_y, fitted_z], axis=1)
+
+    # 轉換為字串格式的方程式
+    def poly_to_str(coeffs, var='t'):
+        return f"{coeffs[0]:.4f}{var}² + {coeffs[1]:.4f}{var} + {coeffs[2]:.4f}"
+
+    eq_x = poly_to_str(coeffs_x, 't')
+    eq_y = poly_to_str(coeffs_y, 't')
+    eq_z = poly_to_str(coeffs_z, 't')
+
+    return (eq_x, eq_y, eq_z), fitted_coords, t, t_new
+
+def fill_nan_with_neighbors(traj_3D):
+    traj_filled = traj_3D.copy()
+    N = len(traj_3D)
+
+    for i in range(N):
+        if np.isnan(traj_filled[i]).any():
+            # 找前一個有效點
+            prev_idx = i - 1
+            while prev_idx >= 0 and np.isnan(traj_filled[prev_idx]).any():
+                prev_idx -= 1
+
+            # 找後一個有效點
+            next_idx = i + 1
+            while next_idx < N and np.isnan(traj_filled[next_idx]).any():
+                next_idx += 1
+
+            if 0 <= prev_idx < N and 0 <= next_idx < N:
+                traj_filled[i] = (traj_filled[prev_idx] + traj_filled[next_idx]) / 2
+            elif 0 <= prev_idx < N:
+                traj_filled[i] = traj_filled[prev_idx]
+            elif 0 <= next_idx < N:
+                traj_filled[i] = traj_filled[next_idx]
+
+    return traj_filled
 
 if __name__ == "__main__":
     pass

@@ -146,7 +146,7 @@ def plot_multiple_3d_trajectories_with_plane(
             x, y, z = zip(*valid_traj)
             fig.add_trace(go.Scatter3d(
                 x=x, y=y, z=z,
-                mode='markers',
+                mode='lines+markers',
                 marker=dict(size=3, color=traj_color),
                 name=f'Trajectory {idx+1}'
             ))
@@ -239,35 +239,100 @@ def plot_multiple_3d_trajectories_with_plane(
     print(f"✅ 已輸出至：{output_html}")
 
 def plot_reprojection_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_error_L, m_reproj_error_R, path=None):
-    # 將所有誤差 list 與標籤打包
+    # # 將所有誤差 list 與標籤打包
+    # error_lists = [
+    #     (traj_reproj_error_L, "Traj Left"),
+    #     (traj_reproj_error_R, "Traj Right"),
+    #     (m_reproj_error_L, "Mark Left"),
+    #     (m_reproj_error_R, "Mark Right")
+    # ]
+
+    # traj_combined = np.concatenate(traj_reproj_error_L, traj_reproj_error_R)
+    # mark_combined = np.concatenate(m_reproj_error_L, m_reproj_error_R)
+
+    traj_combined = np.array(traj_reproj_error_L + traj_reproj_error_R)
+    mark_combined = np.array(m_reproj_error_L + m_reproj_error_R)
+
     error_lists = [
-        (traj_reproj_error_L, "Traj Left"),
-        (traj_reproj_error_R, "Traj Right"),
-        (m_reproj_error_L, "Mark Left"),
-        (m_reproj_error_R, "Mark Right")
+        (traj_combined, "Trajectory"),
+        (mark_combined, "Marker")
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(18, 10))
-    axes = axes.flatten()
+    # 移除負值
+    traj_combined = traj_combined[traj_combined > 0]
+    mark_combined = mark_combined[mark_combined > 0]
 
-    for idx, (errors, title) in enumerate(error_lists):
-        # 將誤差 list 轉為 np array 並排除空值（如 None 或 nan）
-        clean_errors = np.array([e for e in errors if e is not None and not np.isnan(e)])
+    # 計算合併後的平均
+    traj_mean = traj_combined.mean()
+    mark_mean = mark_combined.mean()
 
-        ax = axes[idx]
-        ax.hist(clean_errors, bins=30, color='skyblue', edgecolor='black')
-        avg_error = np.mean(clean_errors) if len(clean_errors) > 0 else 0
-        ax.set_title(f"{title}\nAvg Error = {avg_error:.3f} px")
-        ax.set_xlabel("Reprojection Error (px)")
-        ax.set_ylabel("Frequency")
+    # fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    # axes = axes.flatten()
 
+    # bins = np.linspace(0, 5, 30)
+
+    # for idx, (errors, title) in enumerate(error_lists):
+    #     # 將誤差 list 轉為 np array 並排除空值（如 None 或 nan）
+    #     clean_errors = np.array([e for e in errors if e is not None and not np.isnan(e)])
+
+    #     ax = axes[idx]
+    #     ax.hist(clean_errors, bins=bins, color='skyblue', edgecolor='black')
+    #     # avg_error = np.mean(clean_errors) if len(clean_errors) > 0 else 0
+    #     # ax.set_title(f"{title}\nAvg Error = {avg_error:.3f} px")
+    #     ax.set_title(title)
+    #     ax.axvline(clean_errors.mean(), color='red', linestyle='--', label=f'Avg Error = {clean_errors.mean():.3f} px')
+    #     ax.set_xlabel("Reprojection Error (px)")
+    #     ax.set_ylabel("Frequency")
+    #     ax.legend()
+
+    # plt.tight_layout()
+    # # plt.show()
+    # if path:
+    #     fig.savefig(path)
+    #     print(f"✅ 已輸出至：{path}")
+
+    # 統一 bin 和座標軸範圍
+    bins = np.linspace(0, 4.5, 30)
+    y_max = max(
+        np.histogram(traj_combined, bins=bins)[0].max(),
+        np.histogram(mark_combined, bins=bins)[0].max()
+    )
+
+    # 畫圖：Trajectory
+    plt.figure(figsize=(8, 5))
+    plt.hist(traj_combined, bins=bins, color='skyblue', edgecolor='black')
+    plt.axvline(traj_mean, color='red', linestyle='--', label=f'Avg Error = {traj_mean:.3f} px')
+    plt.title("Trajectory", fontsize=18)
+    plt.xlabel("Reprojection Error (px)", fontsize=15)
+    plt.ylabel("Frequency", fontsize=15)
+    plt.xlim(0, 4.5)
+    plt.ylim(0, y_max + 5)
+    plt.legend(fontsize=12)
+    plt.xticks(fontsize=12) 
+    plt.yticks(fontsize=12)
     plt.tight_layout()
-    # plt.show()
     if path:
-        fig.savefig(path)
-        print(f"✅ 已輸出至：{path}")
+        plt.savefig(path + '/reproj_1.jpg')
+        print(f"✅ 已輸出至：{path + '/reproj_1.jpg'}")
 
-    return fig
+    # 畫圖：Marker
+    plt.figure(figsize=(8, 5))
+    plt.hist(mark_combined, bins=bins, color='lightgreen', edgecolor='black')
+    plt.axvline(mark_mean, color='red', linestyle='--', label=f'Avg Error = {mark_mean:.3f} px')
+    plt.title("Markers", fontsize=18)
+    plt.xlabel("Reprojection Error (px)", fontsize=15)
+    plt.ylabel("Frequency", fontsize=15)
+    plt.xlim(0, 4.5)
+    plt.ylim(0, y_max + 5)
+    plt.legend(fontsize=12)
+    plt.xticks(fontsize=12) 
+    plt.yticks(fontsize=12)
+    plt.tight_layout()
+    if path:
+        plt.savefig(path + '/reproj_2.jpg')
+        print(f"✅ 已輸出至：{path + '/reproj_2.jpg'}")
+
+    
 
 def plot_spin_axis_with_fit_plane(offsets, filtered_offsets, plane, path=None, scale_factor=1.2):
 
@@ -429,4 +494,69 @@ def plot_projected_marks_on_plane_all_frame(valid_data, plane_normal, save_html=
 
     fig.write_html(save_html)
     print(f"✅ 動畫已儲存至 {save_html}")
+
+
+def plot_all_3d_trajectories(traj_list, corners_3D, output_html='multi_traj_plot.html'):
+    traj_colors = [
+        (255, 0, 0), (255, 127, 0), (255, 255, 0), (0, 255, 0),
+        (0, 0, 255), (75, 0, 130), (148, 0, 211), (255, 0, 255),
+        (255, 127, 80), (112, 66, 20), (0, 128, 128), (0, 255, 255)
+    ]
+
+    fig = go.Figure()
+
+    for idx, traj in enumerate(traj_list):
+        traj_color = f'rgb{traj_colors[idx % len(traj_colors)]}'
+
+        # 畫軌跡點
+        valid_traj = traj[~np.isnan(traj).any(axis=1)]
+        if len(valid_traj) > 0:
+            x, y, z = zip(*valid_traj)
+            fig.add_trace(go.Scatter3d(
+                x=x, y=y, z=z,
+                mode='lines+markers',
+                marker=dict(size=3, color=traj_color),
+                name=f'Trajectory {idx+1}'
+            ))
+
+    # 畫矩形平面
+    x_corners, y_corners, z_corners = zip(*corners_3D)
+    x_plane = list(x_corners) + [x_corners[0]]
+    y_plane = list(y_corners) + [y_corners[0]]
+    z_plane = list(z_corners) + [z_corners[0]]
+
+    fig.add_trace(go.Mesh3d(
+        x=x_corners,
+        y=y_corners,
+        z=z_corners,
+        i=[0, 0],
+        j=[1, 2],
+        k=[2, 3],
+        color='lightgreen',
+        opacity=0.5,
+        name='Rectangle Plane'
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=x_plane,
+        y=y_plane,
+        z=z_plane,
+        mode='lines',
+        line=dict(color='green', width=6),
+        name='Rectangle Edge'
+    ))
+
+    fig.update_layout(
+        title='3D Trajectories',
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='Z',
+            aspectmode='data'
+        )
+    )
+
+    pio.write_html(fig, file=output_html, auto_open=False)
+    print(f"✅ 已輸出至：{output_html}")
+
 

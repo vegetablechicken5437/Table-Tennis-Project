@@ -7,8 +7,8 @@ from yolo_runner import *
 from pick_corners import CornerPicker
 from calculation_3D import *
 from traj_processor import *
-from spin_axis_calculation_new import *
-from spin_rate_calculation_new import *
+from spin_axis_calculation import *
+from spin_rate_calculation import *
 from visualize_functions import *
 
 PROCESS_IMAGE = True
@@ -183,16 +183,12 @@ if __name__ == '__main__':
         # 偵測碰撞點 並根據碰撞點切分軌跡和標記
         temp_smoothed_traj = kalman_smooth_with_interp(cleaned_traj, smooth_strength=2, extend_points=10, dt=dt)     # 暫時平滑軌跡 有助找出碰傳idx
         collisions = detect_table_tennis_collisions(temp_smoothed_traj, corners_3D_transformed, z_tolerance=500)
-
-        # print(collisions)
-        # collisions[0] = (100, temp_smoothed_traj[100])
-
         traj_3D_segs = split_trajectory_by_collisions(cleaned_traj, collisions)
         marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
 
         # 切分後每段軌跡分開平滑
         for i in range(len(traj_3D_segs)):
-            smoothed_traj_seg = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=2, extend_points=10, dt=dt)
+            smoothed_traj_seg, smoothed_velocity = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=2, extend_points=10, dt=dt)
             marks_3D_segs[i] = shift_marks_by_trajectory(traj_3D_segs[i], smoothed_traj_seg, marks_3D_segs[i])
             traj_3D_segs[i] = smoothed_traj_seg
             np.savetxt(f'{output_sample_folder_path}/smoothed_traj{i+1}.txt', traj_3D_segs[i])

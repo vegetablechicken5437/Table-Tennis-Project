@@ -131,4 +131,14 @@ class CornerPicker:
 if __name__ == "__main__":
     # picker = CornerPicker([], ".")
     # picker.pick_corners(imgL, imgR)
+
+    all_sample_folder_name = '0527'
+    sample_folder_name = '20250527_215347'
+    ori_img_folder_path = os.path.join('CameraControl/bin/x64/TableTennisData/', all_sample_folder_name, sample_folder_name)    # 原影像資料夾路徑
+    processed_img_folder_path = os.path.join('ProcessedImages', all_sample_folder_name, sample_folder_name)    # 處理後的影像資料夾路徑
+    processed_folder_path = os.path.join(processed_img_folder_path, 'enhanced_LR')
+    output_folder_path = os.path.join('OUTPUT', all_sample_folder_name)
+
+    picker = CornerPicker([], output_folder_path)
+    picker.pick_corners(processed_folder_path)
     pass
