@@ -56,20 +56,25 @@ if __name__ == '__main__':
 
     if PROCESS_IMAGE:
         print('🚀 增強與分割所有影像 ...')
-        for image_file_name in tqdm(os.listdir(ori_img_folder_path)):
-            image_path = os.path.join(ori_img_folder_path, image_file_name)
+        for image_filename in tqdm(os.listdir(ori_img_folder_path)):
+            image_path = os.path.join(ori_img_folder_path, image_filename)
 
             img = cv2.imread(image_path)
             enhanced = enhance_image(img, 2, 30)
             imgL, imgR = split_image(enhanced)
 
-            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_L.jpg"), imgL)
-            cv2.imwrite(os.path.join(processed_folder_path, f"{os.path.splitext(image_file_name)[0]}_R.jpg"), imgR)
+            # 拆出圖片檔名前綴與副檔名
+            name, ext = os.path.splitext(image_filename)
+            image_filename_L = f"{name}_L{ext}"
+            image_filename_R = f"{name}_R{ext}"
+
+            cv2.imwrite(f"{processed_folder_path}/{image_filename_L}", imgL)
+            cv2.imwrite(f"{processed_folder_path}/{image_filename_R}", imgR)
 
     # ----------------------------------------------------------------
     # 透過UI介面手動選取球桌四角，定義世界坐標系
     # ----------------------------------------------------------------
-    if PICK_CORNERS and not os.path.exists(f"{output_folder_path}/corners_3D_transformed.txt"):
+    if PICK_CORNERS:
         picker = CornerPicker([], output_folder_path)
         picker.pick_corners(processed_folder_path)
         left_corners, right_corners = picker.left_corners, picker.right_corners
