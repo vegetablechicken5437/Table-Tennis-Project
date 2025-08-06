@@ -55,7 +55,7 @@ def detect_table_tennis_collisions(traj, table_corners, z_tolerance=0.05):
 
     return collisions
 
-def split_trajectory_by_collisions(traj, collisions):
+def split_traj_by_collisions(traj, collisions):
     """
     根據碰撞點 index 分割軌跡段落，最多切成四段
     :param traj: 原始軌跡資料 (N, 3)
@@ -76,25 +76,6 @@ def split_trajectory_by_collisions(traj, collisions):
         segments.append(traj[start_idx:])  # 剩下的當作最後一段
 
     return segments
-
-def remove_velocity_outliers(traj_3D, threshold_std=3):
-    traj_3D = np.array(traj_3D, dtype=np.float64)
-    mask = ~np.isnan(traj_3D).any(axis=1)
-
-    velocities = np.linalg.norm(np.diff(traj_3D, axis=0), axis=1)
-    median_v = np.median(velocities[~np.isnan(velocities)])
-    std_v = np.std(velocities[~np.isnan(velocities)])
-
-    outlier_mask = np.zeros(len(traj_3D), dtype=bool)
-    for i in range(1, len(traj_3D)):
-        if mask[i] and mask[i-1]:
-            v = np.linalg.norm(traj_3D[i] - traj_3D[i-1])
-            if v > median_v + threshold_std * std_v:
-                outlier_mask[i] = True
-
-    cleaned_traj = traj_3D.copy()
-    cleaned_traj[outlier_mask] = np.nan
-    return cleaned_traj
 
 def remove_outliers_by_knn_distance(traj, k=5, sigma_thres=3.0):
     """
@@ -133,85 +114,6 @@ def remove_outliers_by_knn_distance(traj, k=5, sigma_thres=3.0):
     cleaned_traj[outlier_indices] = [np.nan, np.nan, np.nan]
 
     return cleaned_traj, outlier_indices.tolist()
-
-def interpolate_and_moving_average(traj_3D, window=5):
-    traj_3D = np.array(traj_3D, dtype=np.float64)
-    N = len(traj_3D)
-
-    # 線性內插補齊 NaN
-    valid_mask = ~np.isnan(traj_3D).any(axis=1)
-    valid_indices = np.where(valid_mask)[0]
-    full_indices = np.arange(N)
-
-    interp_traj = np.empty_like(traj_3D)
-    for i in range(3):
-        f = interp1d(valid_indices, traj_3D[valid_mask, i], kind='linear', fill_value="extrapolate")
-        interp_traj[:, i] = f(full_indices)
-
-    # 移動平均
-    smoothed_traj = np.copy(interp_traj)
-    for i in range(3):
-        for j in range(N):
-            left = max(0, j - window // 2)
-            right = min(N, j + window // 2 + 1)
-            smoothed_traj[j, i] = np.mean(interp_traj[left:right, i])
-    
-    return smoothed_traj
-
-# def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5):
-#     """
-#     對3D軌跡進行線性內插與卡爾曼平滑，並在首尾延伸虛擬點減少邊界效應。
-
-#     Parameters:
-#     - traj_3D: shape (N, 3) 的陣列，可能含有 NaN。
-#     - smooth_strength: 平滑強度，越大代表越平滑。
-#     - extend_points: 首尾要延伸的虛擬點數量。
-
-#     Returns:
-#     - smoothed_traj: 經平滑後的3D軌跡，長度與原始輸入相同。
-#     """
-#     traj_3D = np.array(traj_3D, dtype=np.float64)
-#     mask = ~np.isnan(traj_3D).any(axis=1)
-    
-#     full_indices = np.arange(len(traj_3D))
-#     interp_traj = np.empty_like(traj_3D)
-
-#     for i in range(3):
-#         valid_idx = full_indices[mask]
-#         valid_vals = traj_3D[mask, i]
-#         interp_traj[:, i] = np.interp(full_indices, valid_idx, valid_vals)
-
-#     # 延伸首尾
-#     head_dir = interp_traj[1] - interp_traj[0]
-#     tail_dir = interp_traj[-1] - interp_traj[-2]
-#     head_extend = [interp_traj[0] - head_dir * (i+1) for i in range(extend_points)][::-1]
-#     tail_extend = [interp_traj[-1] + tail_dir * (i+1) for i in range(extend_points)]
-
-#     extended_traj = np.vstack([head_extend, interp_traj, tail_extend])
-
-#     # 調整平滑程度
-#     transition_cov = np.diag([1e-4 * smooth_strength]*3 + [1e-6 * smooth_strength]*3)
-#     observation_cov = np.eye(3) * 1e-2 / smooth_strength
-
-#     kf = KalmanFilter(
-#         transition_matrices=np.eye(6),
-#         observation_matrices=np.hstack([np.eye(3), np.zeros((3, 3))]),
-#         transition_covariance=transition_cov,
-#         observation_covariance=observation_cov,
-#         initial_state_mean=np.hstack([extended_traj[0], [0, 0, 0]]),
-#         initial_state_covariance=np.eye(6) * 1e-1
-#     )
-
-#     smoothed_state_means, _ = kf.smooth(extended_traj)
-#     smoothed_traj = smoothed_state_means[:, :3]
-
-#     # 裁切掉首尾延伸的部分
-#     smoothed_traj = smoothed_traj[extend_points:-extend_points]
-
-#     return smoothed_traj
-
-import numpy as np
-from pykalman import KalmanFilter
 
 def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5, dt=1.0):
     """
@@ -278,15 +180,14 @@ def kalman_smooth_with_interp(traj_3D, smooth_strength=1.0, extend_points=5, dt=
 
     return smoothed_traj, smoothed_velocity
 
-
-def shift_marks_by_trajectory(original_traj, smoothed_traj, marks_3D):
+def shift_marks_by_traj(original_traj, smoothed_traj, marks_3D):
     delta = smoothed_traj - original_traj
     shifted_marks = marks_3D.copy()
     mask = ~np.isnan(marks_3D).any(axis=1)
     shifted_marks[mask] += delta[mask]
     return shifted_marks
 
-def extract_valid_trajectory(traj_3D):
+def extract_valid_traj(traj_3D):
     """
     從頭尾刪除全是nan的列，只保留有效的[x,y,z]軌跡部分
     :param traj_np: numpy array of shape (N, 3)
@@ -308,79 +209,6 @@ def extract_valid_trajectory(traj_3D):
 
     return traj_3D[start_idx:end_idx+1], start_idx, end_idx
 
-def fit_parabolic_trajectory(traj, dt, degree=2):
-    t = np.arange(len(traj)) * dt
-    traj_m = traj / 1000.0  # mm to m
-    px = Polynomial.fit(t, traj_m[:, 0], deg=degree).convert()
-    py = Polynomial.fit(t, traj_m[:, 1], deg=degree).convert()
-    pz = Polynomial.fit(t, traj_m[:, 2], deg=degree).convert()
-    return t, px, py, pz
-
-def process_parabolics(traj_3D_segs, dt):
-    px_list, py_list, pz_list, time_segments, t_list = [], [], [], [], []
-    for i in range(len(traj_3D_segs)):
-        t, px, py, pz = fit_parabolic_trajectory(traj_3D_segs[i], dt)      # 擬和拋物線
-        px_list.append(px)
-        py_list.append(py)
-        pz_list.append(pz)
-        time_segments.append(t + (time_segments[-1][-1] + dt if time_segments else 0))
-        t_list.append(t)
-    return px_list, py_list, pz_list, time_segments, t_list
-
-def quadratic_fit_3D(traj_3D, dt):
-    N = len(traj_3D)
-    t = np.arange(N) * dt  # 使用 dt 建立時間軸
-
-    traj_3D = fill_nan_with_neighbors(traj_3D)
-
-    # 對 x, y, z 各自做二次多項式擬合
-    coeffs_x = np.polyfit(t, traj_3D[:, 0], 2)
-    coeffs_y = np.polyfit(t, traj_3D[:, 1], 2)
-    coeffs_z = np.polyfit(t, traj_3D[:, 2], 2)
-
-    # 建立新的等間距時間點（同樣區間長度）
-    t_new = np.linspace(t[0], t[-1], N)
-
-    # 計算擬合後的座標
-    fitted_x = np.polyval(coeffs_x, t_new)
-    fitted_y = np.polyval(coeffs_y, t_new)
-    fitted_z = np.polyval(coeffs_z, t_new)
-    fitted_coords = np.stack([fitted_x, fitted_y, fitted_z], axis=1)
-
-    # 轉換為字串格式的方程式
-    def poly_to_str(coeffs, var='t'):
-        return f"{coeffs[0]:.4f}{var}² + {coeffs[1]:.4f}{var} + {coeffs[2]:.4f}"
-
-    eq_x = poly_to_str(coeffs_x, 't')
-    eq_y = poly_to_str(coeffs_y, 't')
-    eq_z = poly_to_str(coeffs_z, 't')
-
-    return (eq_x, eq_y, eq_z), fitted_coords, t, t_new
-
-def fill_nan_with_neighbors(traj_3D):
-    traj_filled = traj_3D.copy()
-    N = len(traj_3D)
-
-    for i in range(N):
-        if np.isnan(traj_filled[i]).any():
-            # 找前一個有效點
-            prev_idx = i - 1
-            while prev_idx >= 0 and np.isnan(traj_filled[prev_idx]).any():
-                prev_idx -= 1
-
-            # 找後一個有效點
-            next_idx = i + 1
-            while next_idx < N and np.isnan(traj_filled[next_idx]).any():
-                next_idx += 1
-
-            if 0 <= prev_idx < N and 0 <= next_idx < N:
-                traj_filled[i] = (traj_filled[prev_idx] + traj_filled[next_idx]) / 2
-            elif 0 <= prev_idx < N:
-                traj_filled[i] = traj_filled[prev_idx]
-            elif 0 <= next_idx < N:
-                traj_filled[i] = traj_filled[next_idx]
-
-    return traj_filled
 
 if __name__ == "__main__":
     pass

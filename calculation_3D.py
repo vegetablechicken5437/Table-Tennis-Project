@@ -1,13 +1,6 @@
-import cv2
 import numpy as np
-import os
 from tqdm import tqdm
-
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
-from visualize_functions import plot_reprojection_error
+from visualize_functions import plot_ray_sphere_intersection
 
 def read_calibration_file(path):
     data = {}
@@ -103,7 +96,7 @@ def triangulation(left_camera_P, right_camera_P, u, v, up, vp, to_meter=False):
         X /= 1000   # mm 轉為公尺
     return X[:3]
 
-# 投影誤差函式
+# 投影誤差計算函式
 def reprojection_error(P, K, RT, uv_gt):
     P_proj = np.dot(K, RT)
     P = np.array([P[0], P[1], P[2], 1])
@@ -183,81 +176,18 @@ def transform_coord_system(points_3D, basis_points, origin_indices=(0, 3)):
 
     return transformed, R
 
-
 def mark_x_to_mark_o(P_mark, C_ball):
     # 如果是 mark_x，轉換到球的另一面對稱位置
     direction = P_mark - C_ball
     P_mark = C_ball - direction  # 對稱於球心
     return P_mark
 
-# def estimate_marker_3d_on_sphere(K_L, K_R, RT_L, RT_R, uv_L, uv_R, center, radius):
-#     """
-#     根據左右相機的 K、RT、2D 座標與球心、半徑，估算標記的 3D 座標
-#     """
-
-#     def get_camera_center_and_rotation(RT):
-#         R = RT[:3, :3]
-#         t = RT[:3, 3]
-#         C = -R.T @ t
-#         return C, R
-
-#     def pixel_to_ray(K, uv, R):
-#         uv_h = np.array([uv[0], uv[1], 1.0])
-#         d_cam = np.linalg.inv(K) @ uv_h
-#         d_world = R.T @ d_cam
-#         d_world /= np.linalg.norm(d_world)
-#         return d_world
-
-#     def intersect_ray_sphere(C, d, center, radius):
-#         oc = C - center
-#         a = np.dot(d, d)
-#         b = 2.0 * np.dot(oc, d)
-#         c = np.dot(oc, oc) - radius**2
-#         discriminant = b**2 - 4*a*c
-#         if discriminant < 0:
-#             return None
-#         sqrt_disc = np.sqrt(discriminant)
-#         t1 = (-b - sqrt_disc) / (2*a)
-#         t2 = (-b + sqrt_disc) / (2*a)
-#         p1 = C + t1 * d
-#         p2 = C + t2 * d
-#         return p1, p2
-
-#     def select_closest(points, center):
-#         return min(points, key=lambda p: np.linalg.norm(p - center))
-
-#     # 左右相機資訊
-#     C_L, R_L = get_camera_center_and_rotation(RT_L)
-#     C_R, R_R = get_camera_center_and_rotation(RT_R)
-
-#     # 左右相機視線
-#     dir_L = pixel_to_ray(K_L, uv_L, R_L)
-#     dir_R = pixel_to_ray(K_R, uv_R, R_R)
-
-#     # 與球面交點
-#     P_L = intersect_ray_sphere(C_L, dir_L, center, radius)
-#     P_R = intersect_ray_sphere(C_R, dir_R, center, radius)
-#     if P_L is None or P_R is None:
-#         return np.array([np.nan, np.nan, np.nan])
-
-#     P_L_sel = select_closest(P_L, center)
-#     P_R_sel = select_closest(P_R, center)
-
-#     P_est_raw = (P_L_sel + P_R_sel) / 2  # 線性平均
-#     P_est = center + radius * (P_est_raw - center) / np.linalg.norm(P_est_raw - center)  # 強制貼合球面
-
-#     return P_est
-
-import numpy as np
-import plotly.graph_objects as go
-import plotly.io as pio
-
 def visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L, uv_R, center, radius,
-                                                  output_dir='my_results', filename='marker_debug_case1.html'):
+                                                      output_dir = 'my_results', 
+                                                      filename = 'marker_debug_case1.html'):
     """
     視覺化左右相機射線與球面交點，並顯示估算的P_est點
     """
-
     def get_camera_center_and_rotation(RT):
         R = RT[:3, :3]
         t = RT[:3, 3]
@@ -306,77 +236,12 @@ def visualize_ray_sphere_intersection_with_estimation(K_L, K_R, RT_L, RT_R, uv_L
     P_L_pair = intersect_ray_sphere(C_L, d_L, center, radius)
     P_R_pair = intersect_ray_sphere(C_R, d_R, center, radius)
 
-    fig = go.Figure()
-
-    # 畫球面
-    u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:20j]
-    x = center[0] + radius * np.cos(u) * np.sin(v)
-    y = center[1] + radius * np.sin(u) * np.sin(v)
-    z = center[2] + radius * np.cos(v)
-    fig.add_trace(go.Surface(x=x, y=y, z=z, opacity=0.3, showscale=False, colorscale='Blues'))
-
-    # 相機位置
-    fig.add_trace(go.Scatter3d(x=[C_L[0]], y=[C_L[1]], z=[C_L[2]], mode='markers', marker=dict(size=6, color='red'), name='Cam L'))
-    fig.add_trace(go.Scatter3d(x=[C_R[0]], y=[C_R[1]], z=[C_R[2]], mode='markers', marker=dict(size=6, color='green'), name='Cam R'))
-
-    # 射線
-    fig.add_trace(go.Scatter3d(x=[C_L[0], C_L[0] + d_L[0]*5000],
-                               y=[C_L[1], C_L[1] + d_L[1]*5000],
-                               z=[C_L[2], C_L[2] + d_L[2]*5000],
-                               mode='lines', line=dict(color='red'), name='Ray L'))
-
-    fig.add_trace(go.Scatter3d(x=[C_R[0], C_R[0] + d_R[0]*5000],
-                               y=[C_R[1], C_R[1] + d_R[1]*5000],
-                               z=[C_R[2], C_R[2] + d_R[2]*5000],
-                               mode='lines', line=dict(color='green'), name='Ray R'))
-
-    # 交點與估算點
     if P_L_pair is not None and P_R_pair is not None:
         P_L_sel = select_closest(P_L_pair, center)
         P_R_sel = select_closest(P_R_pair, center)
-
-        fig.add_trace(go.Scatter3d(x=[P_L_sel[0]], y=[P_L_sel[1]], z=[P_L_sel[2]],
-                                   mode='markers', marker=dict(size=4, color='red'), name='Intersect L'))
-        fig.add_trace(go.Scatter3d(x=[P_R_sel[0]], y=[P_R_sel[1]], z=[P_R_sel[2]],
-                                   mode='markers', marker=dict(size=4, color='green'), name='Intersect R'))
-        
-        # 左右相機視線方向箭頭（單位方向 * 長度）
-        vis_len = 300  # 可調整視線箭頭的長度
-
-        fig.add_trace(go.Scatter3d(
-            x=[C_L[0], C_L[0] + d_L[0]*vis_len],
-            y=[C_L[1], C_L[1] + d_L[1]*vis_len],
-            z=[C_L[2], C_L[2] + d_L[2]*vis_len],
-            mode='lines+markers',
-            line=dict(color='darkred', dash='dot', width=3),
-            marker=dict(size=2),
-            name='L: viewing direction'
-        ))
-
-        fig.add_trace(go.Scatter3d(
-            x=[C_R[0], C_R[0] + d_R[0]*vis_len],
-            y=[C_R[1], C_R[1] + d_R[1]*vis_len],
-            z=[C_R[2], C_R[2] + d_R[2]*vis_len],
-            mode='lines+markers',
-            line=dict(color='darkgreen', dash='dot', width=3),
-            marker=dict(size=2),
-            name='R: viewing direction'
-        ))
-
-        # 預估點（貼合球面）
-        P_est_raw = (P_L_sel + P_R_sel) / 2
-        P_est = center + radius * (P_est_raw - center) / np.linalg.norm(P_est_raw - center)
-
-        fig.add_trace(go.Scatter3d(x=[P_est[0]], y=[P_est[1]], z=[P_est[2]],
-                                   mode='markers', marker=dict(size=6, color='blue'), name='P_est'))
+        plot_ray_sphere_intersection(center, radius, C_L, C_R, d_L, d_R, P_L_sel, P_R_sel, output_dir, filename)
     else:
         P_est = np.array([np.nan, np.nan, np.nan])
-
-    fig.update_layout(scene=dict(aspectmode='data'),
-                      title='Ray-Sphere Intersection and P_est Visualization')
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, filename)
-    pio.write_html(fig, file=output_path, auto_open=False)
 
     return P_est
 

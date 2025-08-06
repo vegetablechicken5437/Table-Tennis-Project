@@ -5,8 +5,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import plotly.graph_objects as go
 import plotly.io as pio
 import random
+import os
 
-def plot_candidate_trajectories(traj_3D, candidate_trajectories, spin_axis, corners_3D, save_path=None):
+def plot_candidate_trajs(traj_3D, candidate_trajectories, spin_axis, corners_3D, save_path=None):
     """
     使用 Plotly 繪製桌球運動軌跡，並儲存圖像為 HTML 檔案。
     """
@@ -109,7 +110,7 @@ def plot_candidate_trajectories(traj_3D, candidate_trajectories, spin_axis, corn
     # 儲存為 HTML 檔案
     fig.write_html(save_path)
 
-def plot_multiple_3d_trajectories_with_plane(
+def plot_3d_trajs_with_plane(
     traj_list,
     mark_list,
     corners_3D,
@@ -238,25 +239,10 @@ def plot_multiple_3d_trajectories_with_plane(
     pio.write_html(fig, file=output_html, auto_open=False)
     print(f"✅ 已輸出至：{output_html}")
 
-def plot_reprojection_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_error_L, m_reproj_error_R, path=None):
-    # # 將所有誤差 list 與標籤打包
-    # error_lists = [
-    #     (traj_reproj_error_L, "Traj Left"),
-    #     (traj_reproj_error_R, "Traj Right"),
-    #     (m_reproj_error_L, "Mark Left"),
-    #     (m_reproj_error_R, "Mark Right")
-    # ]
-
-    # traj_combined = np.concatenate(traj_reproj_error_L, traj_reproj_error_R)
-    # mark_combined = np.concatenate(m_reproj_error_L, m_reproj_error_R)
+def plot_reproj_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_error_L, m_reproj_error_R, path=None):
 
     traj_combined = np.array(traj_reproj_error_L + traj_reproj_error_R)
     mark_combined = np.array(m_reproj_error_L + m_reproj_error_R)
-
-    error_lists = [
-        (traj_combined, "Trajectory"),
-        (mark_combined, "Marker")
-    ]
 
     # 移除負值
     traj_combined = traj_combined[traj_combined > 0]
@@ -265,31 +251,6 @@ def plot_reprojection_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_e
     # 計算合併後的平均
     traj_mean = traj_combined.mean()
     mark_mean = mark_combined.mean()
-
-    # fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    # axes = axes.flatten()
-
-    # bins = np.linspace(0, 5, 30)
-
-    # for idx, (errors, title) in enumerate(error_lists):
-    #     # 將誤差 list 轉為 np array 並排除空值（如 None 或 nan）
-    #     clean_errors = np.array([e for e in errors if e is not None and not np.isnan(e)])
-
-    #     ax = axes[idx]
-    #     ax.hist(clean_errors, bins=bins, color='skyblue', edgecolor='black')
-    #     # avg_error = np.mean(clean_errors) if len(clean_errors) > 0 else 0
-    #     # ax.set_title(f"{title}\nAvg Error = {avg_error:.3f} px")
-    #     ax.set_title(title)
-    #     ax.axvline(clean_errors.mean(), color='red', linestyle='--', label=f'Avg Error = {clean_errors.mean():.3f} px')
-    #     ax.set_xlabel("Reprojection Error (px)")
-    #     ax.set_ylabel("Frequency")
-    #     ax.legend()
-
-    # plt.tight_layout()
-    # # plt.show()
-    # if path:
-    #     fig.savefig(path)
-    #     print(f"✅ 已輸出至：{path}")
 
     # 統一 bin 和座標軸範圍
     bins = np.linspace(0, 4.5, 30)
@@ -332,9 +293,7 @@ def plot_reprojection_error(traj_reproj_error_L, traj_reproj_error_R, m_reproj_e
         plt.savefig(path + '/reproj_2.jpg')
         print(f"✅ 已輸出至：{path + '/reproj_2.jpg'}")
 
-    
-
-def plot_spin_axis_with_fit_plane(offsets, filtered_offsets, plane, path=None, scale_factor=1.2):
+def plot_spin_axis_and_plane(offsets, filtered_offsets, plane, path=None, scale_factor=1.2):
 
     normal, x_axis, y_axis = plane['normal'], plane['x_axis'], plane['y_axis']
 
@@ -416,7 +375,7 @@ def plot_spin_axis_with_fit_plane(offsets, filtered_offsets, plane, path=None, s
         pio.write_html(fig, file=path, auto_open=False)
         print(f"✅ 已輸出至：{path}")
 
-def plot_projected_marks_on_plane_all_frame(valid_data, plane_normal, save_html=None):
+def plot_marks_anim(valid_data, plane_normal, save_html=None):
     # 建立 Frames
     frames = []
     for i, v1, v2, theta in valid_data:
@@ -495,8 +454,7 @@ def plot_projected_marks_on_plane_all_frame(valid_data, plane_normal, save_html=
     fig.write_html(save_html)
     print(f"✅ 動畫已儲存至 {save_html}")
 
-
-def plot_all_3d_trajectories(traj_list, corners_3D, output_html='multi_traj_plot.html'):
+def plot_all_3d_trajs(traj_list, corners_3D, output_html='multi_traj_plot.html'):
     traj_colors = [
         (255, 0, 0), (255, 127, 0), (255, 255, 0), (0, 255, 0),
         (0, 0, 255), (75, 0, 130), (148, 0, 211), (255, 0, 255),
@@ -559,4 +517,72 @@ def plot_all_3d_trajectories(traj_list, corners_3D, output_html='multi_traj_plot
     pio.write_html(fig, file=output_html, auto_open=False)
     print(f"✅ 已輸出至：{output_html}")
 
+def plot_ray_sphere_intersection(center, radius, C_L, C_R, d_L, d_R, P_L_sel, P_R_sel, output_dir, filename):
+    
+    fig = go.Figure()
+
+    # 畫球面
+    u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:20j]
+    x = center[0] + radius * np.cos(u) * np.sin(v)
+    y = center[1] + radius * np.sin(u) * np.sin(v)
+    z = center[2] + radius * np.cos(v)
+    fig.add_trace(go.Surface(x=x, y=y, z=z, opacity=0.3, showscale=False, colorscale='Blues'))
+
+    # 相機位置
+    fig.add_trace(go.Scatter3d(x=[C_L[0]], y=[C_L[1]], z=[C_L[2]], mode='markers', marker=dict(size=6, color='red'), name='Cam L'))
+    fig.add_trace(go.Scatter3d(x=[C_R[0]], y=[C_R[1]], z=[C_R[2]], mode='markers', marker=dict(size=6, color='green'), name='Cam R'))
+
+    # 射線
+    fig.add_trace(go.Scatter3d(x=[C_L[0], C_L[0] + d_L[0]*5000],
+                               y=[C_L[1], C_L[1] + d_L[1]*5000],
+                               z=[C_L[2], C_L[2] + d_L[2]*5000],
+                               mode='lines', line=dict(color='red'), name='Ray L'))
+
+    fig.add_trace(go.Scatter3d(x=[C_R[0], C_R[0] + d_R[0]*5000],
+                               y=[C_R[1], C_R[1] + d_R[1]*5000],
+                               z=[C_R[2], C_R[2] + d_R[2]*5000],
+                               mode='lines', line=dict(color='green'), name='Ray R'))
+
+    # 交點與估算點
+    fig.add_trace(go.Scatter3d(x=[P_L_sel[0]], y=[P_L_sel[1]], z=[P_L_sel[2]],
+                                mode='markers', marker=dict(size=4, color='red'), name='Intersect L'))
+    fig.add_trace(go.Scatter3d(x=[P_R_sel[0]], y=[P_R_sel[1]], z=[P_R_sel[2]],
+                                mode='markers', marker=dict(size=4, color='green'), name='Intersect R'))
+    
+    # 左右相機視線方向箭頭（單位方向 * 長度）
+    vis_len = 300  # 可調整視線箭頭的長度
+
+    fig.add_trace(go.Scatter3d(
+        x=[C_L[0], C_L[0] + d_L[0]*vis_len],
+        y=[C_L[1], C_L[1] + d_L[1]*vis_len],
+        z=[C_L[2], C_L[2] + d_L[2]*vis_len],
+        mode='lines+markers',
+        line=dict(color='darkred', dash='dot', width=3),
+        marker=dict(size=2),
+        name='L: viewing direction'
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=[C_R[0], C_R[0] + d_R[0]*vis_len],
+        y=[C_R[1], C_R[1] + d_R[1]*vis_len],
+        z=[C_R[2], C_R[2] + d_R[2]*vis_len],
+        mode='lines+markers',
+        line=dict(color='darkgreen', dash='dot', width=3),
+        marker=dict(size=2),
+        name='R: viewing direction'
+    ))
+
+    # 預估點（貼合球面）
+    P_est_raw = (P_L_sel + P_R_sel) / 2
+    P_est = center + radius * (P_est_raw - center) / np.linalg.norm(P_est_raw - center)
+
+    fig.add_trace(go.Scatter3d(x=[P_est[0]], y=[P_est[1]], z=[P_est[2]],
+                                mode='markers', marker=dict(size=6, color='blue'), name='P_est'))
+
+    fig.update_layout(scene=dict(aspectmode='data'),
+                      title='Ray-Sphere Intersection and P_est Visualization')
+    
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, filename)
+    pio.write_html(fig, file=output_path, auto_open=False)
 

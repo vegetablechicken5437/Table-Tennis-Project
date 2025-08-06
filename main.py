@@ -132,11 +132,15 @@ if __name__ == '__main__':
     all_2D_centers = extract_2D_points(mark_poly_label_path, bbox_xyxy_path)
     # ----------------------------------------------------------------
 
+    # ----------------------------------------------------------------
+    # 輸出偵測結果影片
+    # ----------------------------------------------------------------
     if GEN_VERIFY_VIDEO:
         ball_bbox_img_path = f'{ball_yolo_folder}/runs/detect/predict/{all_sample_folder_name}/{sample_folder_name}'
         mark_poly_img_path = f'{mark_yolo_folder}/runs/segment/predict/{all_sample_folder_name}/{sample_folder_name}'
         generate_verify_video(all_2D_centers, ball_bbox_img_path, mark_poly_img_path, 
                               output_path= f'{output_sample_folder_path}/verify_video.mp4')
+    # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # 計算3D座標
@@ -157,7 +161,7 @@ if __name__ == '__main__':
         marks_3D, m_reproj_errors_L, m_reproj_errors_R = get_marks_3D(camParams, traj_3D, lmo, rmo, lmx, rmx, 
                                                                       output_dir=f"{output_sample_folder_path}/marks_intersection")    
         # 輸出重投影誤差圖表
-        plot_reprojection_error(
+        plot_reproj_error(
             traj_reproj_errors_L, traj_reproj_errors_R,
             m_reproj_errors_L, m_reproj_errors_R,
             path = f'{output_sample_folder_path}/reprojection_errors.jpg'
@@ -166,35 +170,34 @@ if __name__ == '__main__':
         # 轉換為自訂的坐標系
         corners_3D_transformed, _ = transform_coord_system(corners_3D, corners_3D)
         traj_3D_transformed, _ = transform_coord_system(traj_3D, corners_3D)
-        marks_3D_transformed = shift_marks_by_trajectory(traj_3D, traj_3D_transformed, marks_3D)
-        # marks_3D_transformed, _ = transform_coord_system(marks_3D, corners_3D)
+        marks_3D_transformed = shift_marks_by_traj(traj_3D, traj_3D_transformed, marks_3D)
 
         np.savetxt(f'{output_folder_path}/corners_3D_transformed.txt', corners_3D_transformed)
         np.savetxt(f'{output_sample_folder_path}/traj_3D_transformed.txt', traj_3D_transformed)
         np.savetxt(f'{output_sample_folder_path}/marks_3D_transformed.txt', marks_3D_transformed)
 
-        plot_multiple_3d_trajectories_with_plane([traj_3D_transformed], [marks_3D_transformed], corners_3D_transformed, 
-                                                 rotation_axis_list=None, 
-                                                 output_html=f'{output_sample_folder_path}/traj_ori.html')
+        # 畫軌跡、標記、旋轉軸(原始軌跡)
+        plot_3d_trajs_with_plane([traj_3D_transformed], [marks_3D_transformed], corners_3D_transformed, 
+                                  rotation_axis_list = None, 
+                                  output_html = f'{output_sample_folder_path}/traj_ori.html')
 
-        
         # 移除軌跡異常點 平滑軌跡 標記點隨平滑後的軌跡平移
         cleaned_traj, outlier_idx = remove_outliers_by_knn_distance(traj_3D_transformed, k=5, sigma_thres=3.0)
 
         # 找出包含軌跡的 frame 和 start_idx, end_idx 從頭尾檢查非空值
-        cleaned_traj, start_idx, end_idx = extract_valid_trajectory(cleaned_traj)
+        cleaned_traj, start_idx, end_idx = extract_valid_traj(cleaned_traj)
         marks_3D_transformed = marks_3D_transformed[start_idx:end_idx+1]
 
         # 偵測碰撞點 並根據碰撞點切分軌跡和標記
         temp_smoothed_traj = kalman_smooth_with_interp(cleaned_traj, smooth_strength=2, extend_points=10, dt=dt)     # 暫時平滑軌跡 有助找出碰傳idx
         collisions = detect_table_tennis_collisions(temp_smoothed_traj, corners_3D_transformed, z_tolerance=500)
-        traj_3D_segs = split_trajectory_by_collisions(cleaned_traj, collisions)
-        marks_3D_segs = split_trajectory_by_collisions(marks_3D_transformed, collisions)
+        traj_3D_segs = split_traj_by_collisions(cleaned_traj, collisions)
+        marks_3D_segs = split_traj_by_collisions(marks_3D_transformed, collisions)
 
         # 切分後每段軌跡分開平滑
         for i in range(len(traj_3D_segs)):
             smoothed_traj_seg, smoothed_velocity = kalman_smooth_with_interp(traj_3D_segs[i], smooth_strength=2, extend_points=10, dt=dt)
-            marks_3D_segs[i] = shift_marks_by_trajectory(traj_3D_segs[i], smoothed_traj_seg, marks_3D_segs[i])
+            marks_3D_segs[i] = shift_marks_by_traj(traj_3D_segs[i], smoothed_traj_seg, marks_3D_segs[i])
             traj_3D_segs[i] = smoothed_traj_seg
             np.savetxt(f'{output_sample_folder_path}/smoothed_traj{i+1}.txt', traj_3D_segs[i])
 
@@ -203,87 +206,82 @@ if __name__ == '__main__':
     # ----------------------------------------------------------------
     if CALCULATE_SPIN_RATE:
 
-        # =======================================
         # 用標記位置計算轉速和旋轉軸
-        # =======================================
         spin_axis_list = []  
-        corners_3D_transformed_meter = corners_3D_transformed / 1000
         for i in range(len(traj_3D_segs)):
 
-            offsets = marks_3D_segs[i] - traj_3D_segs[i]        # 計算標記相對球心的位置
+            # 計算標記相對球心的位置
+            offsets = marks_3D_segs[i] - traj_3D_segs[i]  
             plane, filtered_offsets = ransac_fit_plane(offsets, iterations=100, threshold=5)
-            # plane, filtered_offsets = fit_plane_with_prior(offsets, lam=500)
             spin_axis = plane['normal']
             spin_axis_list.append(spin_axis)
-            print(spin_axis)
 
             # 刪除和旋轉軸偏差過大的標記點
             for j in range(len(filtered_offsets)):
                 if np.isnan(filtered_offsets[j][0]):
                     marks_3D_segs[i][j] = np.array([np.nan, np.nan, np.nan])
 
+            # 若有計算出旋轉軸，則產生圖片
             if not np.isnan(spin_axis[0]):
-                plot_spin_axis_with_fit_plane(offsets, filtered_offsets, plane, 
-                                              path=f"{output_sample_folder_path}/spin_axis_seg{i+1}.html")
+                plot_spin_axis_and_plane(offsets, filtered_offsets, plane, 
+                                         path = f"{output_sample_folder_path}/spin_axis_seg{i+1}.html")
 
         # 畫軌跡、標記、旋轉軸(分段用不同顏色區分)
-        plot_multiple_3d_trajectories_with_plane(traj_3D_segs, marks_3D_segs, corners_3D_transformed, 
-                                                 rotation_axis_list=spin_axis_list, 
-                                                 output_html=f'{output_sample_folder_path}/traj_segs.html')
+        plot_3d_trajs_with_plane(traj_3D_segs, marks_3D_segs, corners_3D_transformed, 
+                                 rotation_axis_list = spin_axis_list, 
+                                 output_html = f'{output_sample_folder_path}/traj_segs.html')
 
         # 對每條軌跡計算後選角速度
         candidate_rounds = ["CW", "CW_EXTRA", "CCW", "CCW_EXTRA"]
-        with open(f"{output_sample_folder_path}/spin_calculation_results.txt", "w") as f:
-            for i in range(len(traj_3D_segs)):
+        
+        for i in range(len(traj_3D_segs)):
 
-                spin_axis = spin_axis_list[i]
-                if np.isnan(spin_axis[0]):      # 如果沒有足夠的標記座標(至少三個)可以擬和平面 跳過後續轉速計算
-                    continue
-                
-                candidate_rps_lists, valid_mark_frames = calc_candidate_spin_rates(traj_3D_segs[i], marks_3D_segs[i], spin_axis, fps=FPS)
+            # 如果沒有足夠的標記座標(至少三個)可以擬和平面，跳過後續轉速計算
+            if np.isnan(spin_axis_list[i][0]):     
+                continue
+            
+            # 計算候選角速度
+            candidate_rps_lists, valid_mark_frames = calc_candidate_spin_rates(traj_3D_segs[i], marks_3D_segs[i], spin_axis, fps=FPS)
 
-                if valid_mark_frames == []:     # 如果沒有任何連續的frame 偵測到標記
-                    continue
+            # 如果沒有任何連續的frame偵測到標記，跳過後續轉速計算
+            if valid_mark_frames == []:     
+                continue
+            
+            # 計算有偵測到標記的比例
+            marks_count = np.sum(~np.isnan(marks_3D_segs[i]).all(axis=1))
+            traj_count = np.sum(~np.isnan(traj_3D_segs[i]).all(axis=1))
+            mark_detect_rate = round(marks_count / traj_count, 2)
 
-                theta_degs = [frame[-1] for frame in valid_mark_frames]
-                
-                marks_count = np.sum(~np.isnan(marks_3D_segs[i]).all(axis=1))
-                traj_count = np.sum(~np.isnan(traj_3D_segs[i]).all(axis=1))
-                mark_detect_rate = round(marks_count / traj_count, 2)
+            # 畫出標記與旋轉軸的動畫
+            plot_marks_anim(valid_mark_frames, spin_axis, 
+                            save_html = f"{output_sample_folder_path}/spin_animation_{i+1}.html")
 
-                plot_projected_marks_on_plane_all_frame(valid_mark_frames, spin_axis, 
-                                                        save_html=f"{output_sample_folder_path}/spin_animation_{i+1}.html")
+            traj_3D_seg_meter = traj_3D_segs[i] / 1000  # mm轉為公尺
 
-                traj_3D_segs[i] /= 1000    # mm轉為公尺
+            # 計算平均速度
+            displacements = np.diff(traj_3D_seg_meter, axis=0)
+            distances = np.linalg.norm(displacements, axis=1)
+            v_avg = round(np.mean(distances / dt), 4)
 
-                # 計算平均速度
-                displacements = np.diff(traj_3D_segs[i], axis=0)
-                distances = np.linalg.norm(displacements, axis=1)
-                v_avg = round(np.mean(distances / dt), 4)
+            candidate_trajs = []
+            results = []
 
-                candidate_trajectories = []
-                results = []
+            # 計算四種旋轉速度回推的軌跡
+            for j, candidate_rps_list in enumerate(candidate_rps_lists):
+                best_rps = find_best_rps(candidate_rps_list)
+                candidate_traj = compute_traj_continuous(traj_3D_seg_meter, dt, FPS, aero_params,
+                                                                best_rps, spin_axis)
+                candidate_trajs.append(candidate_traj)
+                results.append([candidate_rounds[j], spin_axis, best_rps, candidate_traj])
 
-                # 計算四種旋轉速度回推的軌跡
-                for j, candidate_rps_list in enumerate(candidate_rps_lists):
-                    best_rps = find_best_rps(candidate_rps_list)
-                    candidate_traj = compute_trajectory_continuous(traj_3D_segs[i], dt, FPS, aero_params,
-                                                                   best_rps, spin_axis)
-                    candidate_trajectories.append(candidate_traj)
-                    results.append([candidate_rounds[j], spin_axis, best_rps, candidate_traj])
+            calc_res_path = f"{output_sample_folder_path}/spin_calculation_results.txt"
+            
+            # 儲存旋轉速度計算結果
+            write_spin_info(calc_res_path, i, mark_detect_rate, valid_mark_frames, v_avg, results)
 
-                f.write(f"\n======= Trajectory Segment {i+1} =======\n")
-                f.write(f"Mark detection successful rate: {mark_detect_rate}\n")
-                f.write(f"Valid mark frame count: {len(valid_mark_frames)}\n")
-                f.write(f"Average Speed: {v_avg} m/s\n")
-                f.write("===================================\n")
-                for j in range(len(results)):
-                    candidate_round, spin_axis, best_rps, candidate_traj = results[j]
+            candidate_trajs_path = f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html"
 
-                    f.write(f"Candidate_{candidate_round}: \n")
-                    f.write(f"Spin Axis: {list(map(lambda x: round(x, 4), spin_axis))}\n")
-                    f.write(f"Spin Rate: {round(best_rps, 4)} RPS\n")
-                    f.write("===================================\n")
-                
-                plot_candidate_trajectories(traj_3D_segs[i], candidate_trajectories, spin_axis, corners_3D_transformed_meter,
-                                            f"{output_sample_folder_path}/candidate_trajectories_{i+1}.html")
+            # 畫出所有回推軌跡
+            corners_3D_transformed_meter = corners_3D_transformed / 1000
+            plot_candidate_trajs(traj_3D_seg_meter, candidate_trajs, spin_axis, corners_3D_transformed_meter,
+                                 save_path = candidate_trajs_path)
