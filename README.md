@@ -2,7 +2,7 @@
 
 此為一套可以重建3D軌跡以及計算旋轉速度的桌球訓練輔助系統。透過雙相機校正及同步、YOLO深度學習模型、立體視覺幾何推算與旋轉速度估算模型等核心技術，成功解決動態模糊下的特徵追蹤困難，並克服傳統旋轉速度量測方法的挑戰，實現3D軌跡重建及旋轉速度估算，為教練與選手提供精準的技術分析數據。
 
-https://github.com/user-attachments/assets/37df1677-bd13-493f-acd3-e98be5b4bc2b
+https://github.com/user-attachments/assets/7ea4d58b-1acf-4218-9861-73483119227e
 
 ## 系統架構
 
