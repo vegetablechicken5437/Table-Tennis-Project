@@ -7,7 +7,7 @@ https://github.com/user-attachments/assets/37df1677-bd13-493f-acd3-e98be5b4bc2b
 ## 系統架構
 
 ### 1. 雙相機校正
-- 透過拍攝棋盤格圖案進行雙相機標定。接著採用 **張氏標定法 (Zhang’s Camera Calibration Method)**，獲得以下參數：內部參數矩陣 **K**，外部參數 **R、T**，以及畸變係數，校正結果將用於後續立體視覺重建。
+- 拍攝多個角度的棋盤格圖案，接著採用 **張氏標定法 (Zhang’s Camera Calibration Method)**，獲得內部參數矩陣 **K**，外部參數 **R、T**，以及畸變係數，用於後續立體視覺重建。
 <img width="500" height="250" alt="image" src="https://github.com/user-attachments/assets/521114e2-e02a-4920-ae18-064a044d6a4c" />
 
 ### 2. YOLOv11 兩階段偵測
@@ -24,7 +24,7 @@ https://github.com/user-attachments/assets/37df1677-bd13-493f-acd3-e98be5b4bc2b
 <img width="400" height="320" alt="image" src="https://github.com/user-attachments/assets/fc9ab699-38a5-4a8a-aa13-f40afd67c926" />
 
 ### 4. 旋轉速度計算
-- 根據連續幀中標記點的角度變化，計算旋轉位移 Δθ，結合時間差 Δt，估算旋轉角速度：
+- 根據連續幀中標記點的角度變化，計算旋轉位移 Δθ，結合時間差 Δt，估算旋轉速度。
 <img width="500" height="360" alt="image" src="https://github.com/user-attachments/assets/2253516b-6147-4b3c-a867-e79bee612f56" />
 
 
