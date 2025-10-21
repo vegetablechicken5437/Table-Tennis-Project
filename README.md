@@ -14,9 +14,9 @@ https://github.com/user-attachments/assets/37df1677-bd13-493f-acd3-e98be5b4bc2b
 - **階段一：** 在完整畫面中偵測並追蹤桌球位置。
 - **階段二：** 在第一階段的結果中，進一步偵測球面標記，以分析旋轉方向與角度變化。
 - 兩階段皆使用 YOLOv11 訓練之自建資料集，適用於室內高速拍攝環境。
-- 
+
 <img width="300" height="200" alt="image" src="https://github.com/user-attachments/assets/45594469-f1b4-4fd0-8774-2901ebd4ed89" />
-<img width="150" height="150" alt="image" src="https://github.com/user-attachments/assets/ca25e74d-c599-4dcc-a82d-4e81b0ab327f" />
+<img width="200" height="200" alt="image" src="https://github.com/user-attachments/assets/ca25e74d-c599-4dcc-a82d-4e81b0ab327f" />
 
 ### 3. 立體視覺 3D 座標重建
 - 根據雙相機校正所得投影矩陣進行三維重建，將左右畫面中對應的桌球與球面標記匹配後，透過三角測量求出其 3D 座標。
